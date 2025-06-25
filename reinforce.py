@@ -147,7 +147,12 @@ class PolicyGradientAgent:
             'crop_selection': crop_select_action.item()
         }
         log_prob = water_log_prob + fertilizer_log_prob + crop_mask_log_prob + crop_select_log_prob
-        entropy = (water_dist.entropy().mean()/4 + fertilizer_dist.entropy().mean()/4 + crop_mask_dist.entropy().mean()/4 + crop_select_dist.entropy().mean()/4).sum(dim=-1)
+        entropy = (
+            water_dist.entropy().mean()
+            + fertilizer_dist.entropy().mean()
+            + crop_mask_dist.entropy().mean()
+            + crop_select_dist.entropy().mean()
+        ) / 4
         return action, log_prob, entropy
         
     def store_outcome(self, log_prob, reward, state, entropy):
