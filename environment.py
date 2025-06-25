@@ -136,13 +136,14 @@ class Farm(gym.Env):
                 self.farm[i, 3] = 0.0 # yield
             # add water and fertilizer
             if water_amount[i] > 0:
-                self.farm[i, 4] += min(water_amount[i], self.water_supply)
-                self.water_supply -= water_amount[i]
-                
+                water_used = min(water_amount[i], self.water_supply)
+                self.farm[i, 4] += water_used
+                self.water_supply -= water_used
                 
             if fertilizer_amount[i] > 0:
-                self.farm[i, 5] += min(fertilizer_amount[i], self.fertilizer_supply)
-                self.fertilizer_supply -= fertilizer_amount[i]
+                fertilizer_used = min(fertilizer_amount[i], self.fertilizer_supply)
+                self.farm[i, 5] += fertilizer_used
+                self.fertilizer_supply -= fertilizer_used
 
             # clip the water and fertilizer to 1
             self.farm[i, 4] = np.clip(self.farm[i, 4], 0, 1)
@@ -161,7 +162,8 @@ class Farm(gym.Env):
                 if self.farm[i, 4] >= water_need:
                     # Compatible with life
                     # growth, health, yield
-                    self.farm[i, 1] += growth_step * 1.5 if self.farm[i, 5] >= fertilizer_need else growth_step
+                    growth_mutliplier = 1.5 if self.farm[i, 5] >= fertilizer_need else 1.0 # speed up growth if enough fertilizer is used
+                    self.farm[i, 1] = min(self.farm[i,1] + growth_step * growth_mutliplier, 1.0)
                     self.farm[i, 2] = min(self.farm[i, 2] + 0.1, 1.0)
                     self.farm[i, 3] += base_yield * growth_step * 1.25 if self.farm[i, 5] >= fertilizer_need else base_yield * growth_step
                 else:
@@ -179,7 +181,22 @@ class Farm(gym.Env):
                         
                         reward -= self.dead_crop_penalty
         
-        reward += np.mean(self.farm[:, 2]) * 0.4 # reward for healthy crops
+        # step bonus rewards
+        growth_reward = np.mean(self.farm[:, 1]) * 0.3 # reward for growing crops
+        health_reward = np.mean(self.farm[:, 2]) * 0.4 # reward for healthy crops
+        yield_reward = np.mean(self.farm[:, 3]) * 0.2 # reward for yield
+        
+        # good management rewards
+        planted_cells = np.sum(self.farm[:, 0] >= 0)
+        planting_reward = planted_cells / self.total_cells * 0.2
+        
+        # step bonus for resource efficiency
+        water_efficiency = (self.water_supply / self.yearly_water_supply) * 0.1 # reward for efficient water use
+        fertilizer_efficiency = (self.fertilizer_supply / self.yearly_fertilizer_supply) * 0.1
+        
+        reward += health_reward + growth_reward + yield_reward
+        reward += water_efficiency + fertilizer_efficiency
+        reward += planting_reward
         
         # Time step # TODO: a "partial" reward comes after each week when with the harvest mask, a non-sparse reward is better for monte carlo methods
         self.current_week += 1

@@ -1,12 +1,13 @@
 import environment as env
-from reinforce import PolicyGradientAgent, PolicyNetwork
+from reinforce import PolicyGradientAgent
 import numpy as np
 import gymnasium as gym
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 LEARNING_RATE = 3e-4
 GAMMA = 0.99  # Discount factor
-EPISODES = 3000  # Number of training episodes
+EPISODES = 1000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
 
@@ -32,25 +33,61 @@ def flatten_action(action):
 
 def agent_action_to_env(action, total_cells):
     return {
-        'crop_mask': action[:total_cells],
-        # 'harvest_mask': np.zeros(total_cells, dtype=np.int8),
-        'water_amount': action[total_cells:2*total_cells],
-        'fertilizer_amount': action[2*total_cells:3*total_cells],
-        'crop_selection': action[-1],  # Always plant wheat
+        'crop_mask': (action[:total_cells] > 0).astype(int),  # Threshold at 0
+        'crop_selection': np.clip(np.round(action[2*total_cells]), 0, 3).astype(int),
+        'water_amount': (action[total_cells:2*total_cells] + 1) / 2,  # Scale to [0,1]
+        'fertilizer_amount': (action[2*total_cells:3*total_cells] + 1) / 2
     }
 
+def random_train(farm_env, years, episodes):
+    pbar = tqdm(total=episodes, desc="Training", unit="step")
+    mean_rewards = []
+    water_reserve = []
+    fertilizer_reserve = []
+    state, _ = farm_env.reset()
+    for episode in range(episodes):
+        obs, _ = farm_env.reset()
+        state = flatten_observation(obs, years)
+        terminated = False
+        truncated = False
+        rewards = []
+        
+        while not (terminated or truncated):
+            action = farm_env.action_space.sample()
+            # action, log_prob = agent.select_action_hybrid(state)
+            # next_state, reward, terminated, truncated, info = farm_env.step(agent_action_to_env(action=action, total_cells=total_cells))
+            next_state, reward, terminated, truncated, info = farm_env.step(action)
+            # agent.store_outcome(log_prob, reward, state)
+            state = flatten_observation(next_state, years)
+            rewards.append(reward)
+
+        pbar.update(1)
+        pbar.set_postfix(reward=np.mean(rewards))
+        mean_rewards.append(np.mean(rewards))
+        
+    pbar.close()
+    print(mean_rewards)
+    plt.figure(figsize=(12, 6))
+    plt.plot(mean_rewards)
+    plt.xlabel('Episodes')
+    plt.ylabel('Mean Reward')
+    plt.title('Random mean rewards')
+    plt.grid()
+    plt.ylim(-3, 5)
+    plt.savefig('random_mean_rewards.png')
+    
 
 def main():
-    years = 3
+    years = 10
     farm_size = (3, 3)
-    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=100, yearly_fertilizer_supply=100, yearly_labor_supply=1000)
+    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=9*52, yearly_fertilizer_supply=5*52, yearly_labor_supply=1000)
     
     sample_obs, _ = farm_env.reset()
     sample_action = farm_env.action_space.sample()
     
     total_cells = farm_size[0] * farm_size[1]
     state_dim = flatten_observation(sample_obs, years).shape[0] # total_cells * 6 + 5
-    action_dim = flatten_action(sample_action).shape[0]  # total_cells * 3 + 1
+    # action_dim = flatten_action(sample_action).shape[0]  # total_cells * 3 + 1
     
     print("Predicted Observation Space Shape:", (state_dim,))
     print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
@@ -76,8 +113,9 @@ def main():
     # print("Truncated:", truncated)
     # print("Info:", info)    
     
+    random_train(farm_env, years, 50)
 
-    agent = PolicyGradientAgent(state_dim=state_dim, action_dim=action_dim, learning_rate=LEARNING_RATE, gamma=GAMMA)
+    agent = PolicyGradientAgent(state_dim=state_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA)
     
     
     pbar = tqdm(total=EPISODES, desc="Training", unit="step")
@@ -88,23 +126,19 @@ def main():
     for episode in range(EPISODES):
         obs, _ = farm_env.reset()
         state = flatten_observation(obs, years)
-        done = False
+        terminated = False
         truncated = False
         rewards = []
         
-        while not (done or truncated):
+        while not (terminated or truncated):
             # action = farm_env.action_space.sample()
-            action, log_prob = agent.select_action(state)
-            next_state, reward, terminated, truncated, info = farm_env.step(agent_action_to_env(action=action, total_cells=total_cells))
-            agent.store_outcome(log_prob, reward, state)
+            action, log_prob, entropy = agent.select_action_hybrid(state)
+            # next_state, reward, terminated, truncated, info = farm_env.step(agent_action_to_env(action=action, total_cells=total_cells))
+            next_state, reward, terminated, truncated, info = farm_env.step(action)
+            agent.store_outcome(log_prob, reward, state, entropy)
             state = flatten_observation(next_state, years)
-
             
             rewards.append(reward)
-            water_reserve.append(sample_obs['water_supply'])
-            fertilizer_reserve.append(sample_obs['fertilizer_supply'])
-        
-        
         
         pbar.update(1)
         pbar.set_postfix(reward=np.mean(rewards))
@@ -113,12 +147,25 @@ def main():
         # update policy every BATCH_SIZE episodes
         if (episode + 1) % BATCH_SIZE == 0:
             agent.update_policy()
-    
+        
+        if episode % 10 == 0:
+            print(f"Action stats: "
+                f"Water={action['water_amount'].mean():.2f}±{action['water_amount'].std():.2f} "
+                f"Fert={action['fertilizer_amount'].mean():.2f} "
+                f"CropMask={action['crop_mask'].mean():.2f} "
+                f"CropSel={action['crop_selection']}")
+            
     pbar.close()
     print(mean_rewards)
+    plt.figure(figsize=(12, 6))
+    plt.plot(mean_rewards)
+    plt.xlabel('Episodes')
+    plt.ylabel('Mean Reward')
+    plt.title('REINFORCE mean rewards')
+    plt.grid()
+    plt.ylim(-3, 5)
+    plt.savefig('reinforce_mean_rewards.png')
     
-    print("Final Water Reserve:", np.mean(water_reserve))
-
     # print(fertilizer_reserve)
 if __name__ == "__main__":
     main()
