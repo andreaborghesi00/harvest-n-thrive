@@ -16,7 +16,7 @@ class ResidualBlock(nn.Module):
         self.block = nn.Sequential(
             nn.Linear(dim, dim),
             nn.LayerNorm(dim),
-            nn.LeakyReLU(inplace=True),
+            nn.SiLU(inplace=True),
             nn.Linear(dim, dim),
             nn.LayerNorm(dim),
         )
@@ -36,12 +36,29 @@ class HybridActorCritic(nn.Module):
             nn.LayerNorm(512),
             nn.SiLU(inplace=True),
 
+        )
+        
+        self.policy_head = nn.Sequential(
             ResidualBlock(512),
-
             nn.Linear(512, 256),
             nn.LayerNorm(256),
             nn.SiLU(inplace=True),
             ResidualBlock(256),
+        )
+        
+        self.value_head = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.LayerNorm(256),
+            nn.SiLU(inplace=True),
+            ResidualBlock(256),
+            nn.Linear(256, 128),
+            nn.LayerNorm(128),
+            nn.SiLU(inplace=True),
+            nn.Linear(128, 64),
+            nn.LayerNorm(64),
+            nn.SiLU(inplace=True),
+            nn.Linear(64, 1)
+            
         )
         
         # policy heads
@@ -53,23 +70,26 @@ class HybridActorCritic(nn.Module):
         self.crop_select_head = nn.Linear(256, 4)
         
         # value head
-        self.value_head = nn.Linear(256, 1)
+        # self.value_head = nn.Linear(256, 1)
         
     def forward(self, x):
         h = self.shared(x)
+        
+        policy_features = self.policy_head(h)  # shared features for policy heads
+        
         # policy dists
-        mu_water = self.water_head(h)
+        mu_water = self.water_head(policy_features)
         std_water = self.water_log_std.exp().unsqueeze(0)
         dist_water = Normal(mu_water, std_water)
 
-        mu_fertilizer = self.fertilizer_head(h)
+        mu_fertilizer = self.fertilizer_head(policy_features)
         std_fertilizer = self.fertilizer_log_std.exp().unsqueeze(0)
         dist_fertilizer = Normal(mu_fertilizer, std_fertilizer)
         
-        crop_mask_logits = self.crop_mask_head(h)
+        crop_mask_logits = self.crop_mask_head(policy_features)
         dist_crop_mask = Bernoulli(logits=crop_mask_logits)
         
-        crop_select_logits = self.crop_select_head(h)
+        crop_select_logits = self.crop_select_head(policy_features)
         dist_crop_sel = Categorical(logits=crop_select_logits)
         
         v = self.value_head(h).squeeze(-1)     # feed the "decisions" into the critic head
@@ -120,25 +140,32 @@ class ActorCriticAgent:
         return action, log_prob, entropy, v
         
     def store_outcome(self, log_prob, reward, v, next_state, entropy):
+        next_v =  self.a2c(torch.FloatTensor(next_state).unsqueeze(0).to(self.device))[-1] if next_state is not None else 0.0
         self.memory.append({
-            'logp': log_prob.detach(),
-            'entropy': entropy.detach(),
-            'reward': reward.detach(),
+            'logp': log_prob,
+            'entropy': entropy,
+            'reward': torch.tensor(reward, device=self.device),
             'value': v.detach(),
-            'next_value': self.a2c(torch.FloatTensor(next_state).unsqueeze(0).to(self.device))[-1].item()  # Get next value estimate
+            'next_value': torch.tensor(next_v, device=self.device) # Get next value estimate
             })
 
     def update(self):
         global EXPLORATION_COEFFICIENT
         R = 0  # Discounted return
-        policy_loss = []
-        returns = []
 
         logps      = torch.stack([e['logp']      for e in self.memory])
         entropies  = torch.stack([e['entropy']   for e in self.memory])
         rewards    = torch.tensor([e['reward']    for e in self.memory], device=self.device)
         values     = torch.tensor([e['value']     for e in self.memory], device=self.device)
         next_vals  = torch.tensor([e['next_value']for e in self.memory], device=self.device)
+
+        # td(lambda): compute the eligibility traces
+        # R = 0
+        # deltas = []
+        # for r, v, next_v in zip(rewards.flip(0), values.flip(0), next_vals.flip(0)):
+        #     R = r + self.gamma * next_v - v
+        #     deltas.append(R)
+        # deltas = torch.tensor(deltas[::-1], device=self.device)  # Reverse to match original order
 
         deltas = rewards + self.gamma * next_vals - values
 
