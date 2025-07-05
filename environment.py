@@ -249,6 +249,6 @@ register(
                                                       yearly_water_supply=yearly_water_supply, 
                                                       yearly_fertilizer_supply=yearly_fertilizer_supply, 
                                                       yearly_labor_supply=yearly_labor_supply),
-    max_episode_steps=520, # 50 years 
+    max_episode_steps=2600, # 50 years 
 )
         
