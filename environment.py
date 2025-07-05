@@ -182,17 +182,17 @@ class Farm(gym.Env):
                         reward -= self.dead_crop_penalty
         
         # step bonus rewards
-        growth_reward = np.mean(self.farm[:, 1]) * 0.3 # reward for growing crops
-        health_reward = np.mean(self.farm[:, 2]) * 0.4 # reward for healthy crops
-        yield_reward = np.mean(self.farm[:, 3]) * 0.2 # reward for yield
+        growth_reward = np.mean(self.farm[:, 1]) * 1.3 # reward for growing crops
+        health_reward = np.mean(self.farm[:, 2]) * 1.4 # reward for healthy crops
+        yield_reward = np.mean(self.farm[:, 3]) * 1.2 # reward for yield
         
         # good management rewards
         planted_cells = np.sum(self.farm[:, 0] >= 0)
-        planting_reward = planted_cells / self.total_cells * 0.2
+        planting_reward = planted_cells / self.total_cells * 1.2
         
         # step bonus for resource efficiency
-        water_efficiency = (self.water_supply / self.yearly_water_supply) * 0.1 # reward for efficient water use
-        fertilizer_efficiency = (self.fertilizer_supply / self.yearly_fertilizer_supply) * 0.1
+        water_efficiency = (self.water_supply / self.yearly_water_supply) * 1.1 # reward for efficient water use
+        fertilizer_efficiency = (self.fertilizer_supply / self.yearly_fertilizer_supply) * 1.1
         
         reward += health_reward + growth_reward + yield_reward
         reward += water_efficiency + fertilizer_efficiency
@@ -219,12 +219,12 @@ class Farm(gym.Env):
             self.fertilizer_supply = self.yearly_fertilizer_supply
             self.labor_supply = self.yearly_labor_supply
             
-            # Check if the episode is done
+            # check if the episode is finished
             if self.current_year >= self.years:
                 terminated = True
 
 
-        # Update the observation
+        # update observation
         observation = self._get_observation()
         observation["farm_state"] = self.farm
         observation["water_supply"] = np.array([self.water_supply], dtype=np.float32)
