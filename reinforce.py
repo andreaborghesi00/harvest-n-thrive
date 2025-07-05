@@ -6,7 +6,8 @@ import torch.optim as optim
 import torch.nn.functional as F
 import cv2
 
-EXPLORATION_COEFFICIENT = 0.05
+EXPLORATION_COEFFICIENT = 0.2
+EXPLORATION_COEFFICIENT_DECAY = 0.99
 
 class ResidualBlock(nn.Module):
     def __init__(self, dim):
@@ -190,6 +191,11 @@ class PolicyGradientAgent:
         
         episode_reward = sum(reward for _, reward, _, _ in self.memory)
         self.scheduler.step(episode_reward)
+        
+        # Exploration coefficient decay
+        global EXPLORATION_COEFFICIENT
+        EXPLORATION_COEFFICIENT *= EXPLORATION_COEFFICIENT_DECAY
+        EXPLORATION_COEFFICIENT = max(EXPLORATION_COEFFICIENT, 0.01)
         
         # Clear memory after updating policy
         self.memory = []
