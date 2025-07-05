@@ -157,6 +157,8 @@ def main():
             
     pbar.close()
     print(mean_rewards)
+    np.save('reinforce_mean_rewards.npy', mean_rewards)
+    
     plt.figure(figsize=(12, 6))
     plt.plot(mean_rewards)
     plt.xlabel('Episodes')

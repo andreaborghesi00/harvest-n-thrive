@@ -196,3 +196,13 @@ cython_debug/
 # Notebooks
 .ipynb_checkpoints/
 *.ipynb
+
+# Numpy
+*.npy
+
+# plots and figures
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
