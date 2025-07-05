@@ -12,6 +12,7 @@ GAMMA = 0.99  # Discount factor
 EPISODES = 1000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def flatten_observation(obs, years):
     return np.concatenate([
@@ -41,12 +42,21 @@ def agent_action_to_env(action, total_cells):
         'fertilizer_amount': (action[2*total_cells:3*total_cells] + 1) / 2
     }
 
+
+def average_infos(infos):
+    avg_info = {}
+    for key in infos[0].keys():
+        avg_info[key] = np.mean([info[key] for info in infos])
+    return avg_info
+
+
 def random_train(farm_env, years, episodes):
     pbar = tqdm(total=episodes, desc="Training", unit="step")
     mean_rewards = []
     water_reserve = []
     fertilizer_reserve = []
     state, _ = farm_env.reset()
+    infos = []
     for episode in range(episodes):
         obs, _ = farm_env.reset()
         state = flatten_observation(obs, years)
@@ -62,13 +72,15 @@ def random_train(farm_env, years, episodes):
             # agent.store_outcome(log_prob, reward, state)
             state = flatten_observation(next_state, years)
             rewards.append(reward)
-
+        infos.append(info)
         pbar.update(1)
         pbar.set_postfix(reward=np.mean(rewards))
         mean_rewards.append(np.mean(rewards))
         
     pbar.close()
     print(mean_rewards)
+    print(average_infos(infos))
+    np.save('random_mean_rewards.npy', mean_rewards)
     plt.figure(figsize=(12, 6))
     plt.plot(mean_rewards)
     plt.xlabel('Episodes')
@@ -120,8 +132,8 @@ def main():
     print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
     print("Sample Action Shape:", flatten_action(sample_action).shape)
  
-    # random_train(farm_env, years, 50)
-
+    random_train(farm_env, years, 50)
+    exit()
     agent = PolicyGradientAgent(state_dim=state_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA)
     
     eps_start   = 1.0      # start fully random
@@ -134,6 +146,7 @@ def main():
     mean_rewards = []
     water_reserve = []
     fertilizer_reserve = []
+    infos = []
     state, _ = farm_env.reset()
     for episode in range(EPISODES):
         obs, _ = farm_env.reset()
@@ -165,15 +178,16 @@ def main():
         pbar.update(1)
         pbar.set_postfix(reward=np.mean(rewards))
         mean_rewards.append(np.mean(rewards))
-        
+        infos.append(info)
         # Decay epsilon
         epsilon = max(epsilon * eps_decay, eps_end)
         
         # update policy every BATCH_SIZE episodes
         if (episode + 1) % BATCH_SIZE == 0:
             agent.update_policy()
+            print(average_infos(infos[-BATCH_SIZE:]))
         
-        if episode % 10 == 0:
+        if episode % BATCH_SIZE == 0:
             print(f"Action stats: "
                 f"Water={action['water_amount'].mean():.2f}±{action['water_amount'].std():.2f} "
                 f"Fert={action['fertilizer_amount'].mean():.2f} "

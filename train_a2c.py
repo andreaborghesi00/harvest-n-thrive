@@ -15,7 +15,7 @@ BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
 C1 = 0.5  # Coefficient for critic loss
 YEARS = 10
-DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def flatten_observation(obs):
     return np.concatenate([
@@ -47,12 +47,19 @@ def agent_action_to_env(action, total_cells):
     }
 
 
+def average_infos(infos):
+    avg_info = {}
+    for key in infos[0].keys():
+        avg_info[key] = np.mean([info[key] for info in infos])
+    return avg_info
+
 def random_train(farm_env, episodes):
     pbar = tqdm(total=episodes, desc="Training", unit="step")
     mean_rewards = []
     water_reserve = []
     fertilizer_reserve = []
     state, _ = farm_env.reset()
+    infos = []
     for episode in range(episodes):
         obs, _ = farm_env.reset()
         state = flatten_observation(obs)
@@ -68,12 +75,13 @@ def random_train(farm_env, episodes):
             # agent.store_outcome(log_prob, reward, state)
             state = flatten_observation(next_state)
             rewards.append(reward)
-
+        infos.append(info)
         pbar.update(1)
         pbar.set_postfix(reward=np.mean(rewards))
         mean_rewards.append(np.mean(rewards))
         
     pbar.close()
+    print(average_infos(infos))
     print(mean_rewards)
     plt.figure(figsize=(12, 6))
     plt.plot(mean_rewards)
@@ -99,14 +107,14 @@ def main():
     print("Observation Space Shape:", flatten_observation(sample_obs).shape)
     print("Sample Action Shape:", flatten_action(sample_action).shape)
  
-    # random_train(farm_env, years, 50)
+    random_train(farm_env, 50)
 
     agent = ActorCriticAgent(state_dim=state_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA, c1=C1, device=DEVICE)
     
     pbar = tqdm(total=EPISODES, desc="Training", unit="step")
     mean_rewards = []
     state, _ = farm_env.reset()
-
+    infos = []
     # main loop
     for episode in range(EPISODES):
         obs, _ = farm_env.reset()
@@ -119,7 +127,7 @@ def main():
         while not (terminated or truncated):
             action, log_prob, entropy, v = agent.select_action_hybrid(state)
                 
-            next_state, reward, terminated, truncated, _ = farm_env.step(action)
+            next_state, reward, terminated, truncated, info = farm_env.step(action)
             agent.store_outcome(log_prob=log_prob, reward=reward, next_state=flatten_observation(next_state) if not (terminated or truncated) else None, v=v, entropy=entropy)
             state = flatten_observation(next_state)
             
@@ -128,10 +136,12 @@ def main():
         pbar.update(1)
         pbar.set_postfix(reward=np.mean(rewards))
         mean_rewards.append(np.mean(rewards))
-        
+        infos.append(info)
         # update policy every BATCH_SIZE episodes
         if (episode + 1) % BATCH_SIZE == 0:
             agent.update()
+            print(average_infos(infos[-BATCH_SIZE:]))
+
         
         if episode % 10 == 0:
             print(f"Action stats: "
