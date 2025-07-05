@@ -160,6 +160,7 @@ class PolicyGradientAgent:
         self.memory.append((log_prob, reward, state, entropy))
 
     def update_policy(self):
+        global EXPLORATION_COEFFICIENT
         R = 0  # Discounted return
         policy_loss = []
         returns = []
@@ -193,7 +194,6 @@ class PolicyGradientAgent:
         self.scheduler.step(episode_reward)
         
         # Exploration coefficient decay
-        global EXPLORATION_COEFFICIENT
         EXPLORATION_COEFFICIENT *= EXPLORATION_COEFFICIENT_DECAY
         EXPLORATION_COEFFICIENT = max(EXPLORATION_COEFFICIENT, 0.01)
         
