@@ -15,7 +15,7 @@ BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
 C1 = 0.5  # Coefficient for critic loss
 YEARS = 10
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 def flatten_observation(obs):
     return np.concatenate([
@@ -120,7 +120,7 @@ def main():
             action, log_prob, entropy, v = agent.select_action_hybrid(state)
                 
             next_state, reward, terminated, truncated, _ = farm_env.step(action)
-            agent.store_outcome(log_prob=log_prob, reward=reward, next_state=flatten_observation(next_state), v=v, entropy=entropy)
+            agent.store_outcome(log_prob=log_prob, reward=reward, next_state=flatten_observation(next_state) if not (terminated or truncated) else None, v=v, entropy=entropy)
             state = flatten_observation(next_state)
             
             rewards.append(reward)
