@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 import random
 import torch
 from actor2critic import HybridActorCritic, ActorCriticAgent
+import signal
+import threading
+
 
 LEARNING_RATE = 3e-4
 GAMMA = 0.99  # Discount factor
@@ -15,7 +18,15 @@ BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
 C1 = 0.5  # Coefficient for critic loss
 YEARS = 10
-DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+shutdown_flag = threading.Event()
+
+def on_sigint(signum, frame):
+    print("\nSIGINT received; will stop after this episode.")
+    shutdown_flag.set()
+    
+signal.signal(signal.SIGINT, on_sigint)
 
 def flatten_observation(obs):
     return np.concatenate([
@@ -75,6 +86,7 @@ def random_train(farm_env, episodes):
         
     pbar.close()
     print(mean_rewards)
+    np.save('random_mean_rewards.npy', mean_rewards)
     plt.figure(figsize=(12, 6))
     plt.plot(mean_rewards)
     plt.xlabel('Episodes')
@@ -86,7 +98,7 @@ def random_train(farm_env, episodes):
 
 
 def main():
-    farm_size = (3, 3)
+    farm_size = (4, 4)
     total_cells = farm_size[0] * farm_size[1]
     farm_env = gym.envs.make("Farm-v0", years=YEARS, farm_size=farm_size, yearly_water_supply=9*52, yearly_fertilizer_supply=5*52, yearly_labor_supply=1000)
     
@@ -99,8 +111,8 @@ def main():
     print("Observation Space Shape:", flatten_observation(sample_obs).shape)
     print("Sample Action Shape:", flatten_action(sample_action).shape)
  
-    # random_train(farm_env, years, 50)
-
+    random_train(farm_env, 50)
+    exit()
     agent = ActorCriticAgent(state_dim=state_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA, c1=C1, device=DEVICE)
     
     pbar = tqdm(total=EPISODES, desc="Training", unit="step")
@@ -109,6 +121,9 @@ def main():
 
     # main loop
     for episode in range(EPISODES):
+        if shutdown_flag.is_set():
+            break
+
         obs, _ = farm_env.reset()
         state = flatten_observation(obs)
         terminated = False
@@ -151,7 +166,7 @@ def main():
     plt.title('REINFORCE mean rewards')
     plt.grid()
     plt.ylim(-3, 5)
-    plt.savefig('reinforce_mean_rewards.png')
+    plt.savefig('a2c_mean_rewards.png')
     
     # print(fertilizer_reserve)
 if __name__ == "__main__":
