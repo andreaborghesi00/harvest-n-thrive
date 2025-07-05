@@ -4,14 +4,14 @@ import numpy as np
 import gymnasium as gym
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import random
+import torch
 
 LEARNING_RATE = 3e-4
 GAMMA = 0.99  # Discount factor
 EPISODES = 1000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
-
-
 
 def flatten_observation(obs, years):
     return np.concatenate([
@@ -120,9 +120,15 @@ def main():
     print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
     print("Sample Action Shape:", flatten_action(sample_action).shape)
  
-    random_train(farm_env, years, 50)
+    # random_train(farm_env, years, 50)
 
     agent = PolicyGradientAgent(state_dim=state_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA)
+    
+    eps_start   = 1.0      # start fully random
+    eps_end     = 0.1      # end with some randomness
+    eps_decay   = 0.995    # decay per episode
+
+    epsilon = eps_start
     
     pbar = tqdm(total=EPISODES, desc="Training", unit="step")
     mean_rewards = []
@@ -138,7 +144,17 @@ def main():
         
         while not (terminated or truncated):
             # action = farm_env.action_space.sample()
-            action, log_prob, entropy = agent.select_action_hybrid(state)
+            
+            if random.random() < epsilon:
+            # if False:
+                # exploration
+                action = farm_env.action_space.sample()
+                log_prob = torch.tensor([0.0], device=agent.device)
+                entropy  = torch.tensor(0.0, device=agent.device)
+            else:
+                # exploitation
+                action, log_prob, entropy = agent.select_action_hybrid(state)
+                
             # next_state, reward, terminated, truncated, info = farm_env.step(agent_action_to_env(action=action, total_cells=total_cells))
             next_state, reward, terminated, truncated, info = farm_env.step(action)
             agent.store_outcome(log_prob, reward, state, entropy)
@@ -149,6 +165,9 @@ def main():
         pbar.update(1)
         pbar.set_postfix(reward=np.mean(rewards))
         mean_rewards.append(np.mean(rewards))
+        
+        # Decay epsilon
+        epsilon = max(epsilon * eps_decay, eps_end)
         
         # update policy every BATCH_SIZE episodes
         if (episode + 1) % BATCH_SIZE == 0:
