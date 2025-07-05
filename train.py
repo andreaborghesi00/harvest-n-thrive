@@ -11,6 +11,8 @@ EPISODES = 1000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
 
+
+
 def flatten_observation(obs, years):
     return np.concatenate([
         obs['farm_state'].flatten(),
@@ -76,6 +78,32 @@ def random_train(farm_env, years, episodes):
     plt.ylim(-3, 5)
     plt.savefig('random_mean_rewards.png')
     
+def sample_step_info(farm_env, years):
+    sample_obs, _ = farm_env.reset()
+    sample_action = farm_env.action_space.sample()
+    observation, reward, terminated, truncated, info = farm_env.step(sample_action)
+    state_dim = flatten_observation(sample_obs, years).shape[0] # total_cells * 6 + 5
+
+    print("Predicted Observation Space Shape:", (state_dim,))
+    print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
+    
+    print("Initial Observation:", sample_obs['farm_state'])
+    
+    print("Sample Action Shape:", flatten_action(sample_action).shape)
+    print("Sample Action:", sample_action)
+    
+    print("Step Result:")
+    print("Crops:", observation['farm_state'][:, 0])
+    print("Growth:", observation['farm_state'][:, 1])
+    print("Health:", observation['farm_state'][:, 2])
+    print("Yield:", observation['farm_state'][:, 3])
+    print("Water:", observation['farm_state'][:, 4])
+    print("Fertilizer:", observation['farm_state'][:, 5])
+    
+    print("Reward:", reward)
+    print("Terminated:", terminated)
+    print("Truncated:", truncated)
+    print("Info:", info)    
 
 def main():
     years = 10
@@ -87,36 +115,14 @@ def main():
     
     total_cells = farm_size[0] * farm_size[1]
     state_dim = flatten_observation(sample_obs, years).shape[0] # total_cells * 6 + 5
-    # action_dim = flatten_action(sample_action).shape[0]  # total_cells * 3 + 1
     
     print("Predicted Observation Space Shape:", (state_dim,))
     print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
-    
-    print("Initial Observation:", sample_obs['farm_state'])
-    
     print("Sample Action Shape:", flatten_action(sample_action).shape)
-    print("Sample Action:", sample_action)
-    
-    # sample step
-    
-    # observation, reward, terminated, truncated, info = farm_env.step(sample_action)
-    # print("Step Result:")
-    # print("Crops:", observation['farm_state'][:, 0])
-    # print("Growth:", observation['farm_state'][:, 1])
-    # print("Health:", observation['farm_state'][:, 2])
-    # print("Yield:", observation['farm_state'][:, 3])
-    # print("Water:", observation['farm_state'][:, 4])
-    # print("Fertilizer:", observation['farm_state'][:, 5])
-    
-    # print("Reward:", reward)
-    # print("Terminated:", terminated)
-    # print("Truncated:", truncated)
-    # print("Info:", info)    
-    
+ 
     random_train(farm_env, years, 50)
 
     agent = PolicyGradientAgent(state_dim=state_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA)
-    
     
     pbar = tqdm(total=EPISODES, desc="Training", unit="step")
     mean_rewards = []
