@@ -86,9 +86,12 @@ class Farm(gym.Env):
             "harvested_crops": 0,
             "water_used": 0.0,
             "fertilizer_used": 0.0,
-            "average_growth_stage": 0.0,
-            "average_health": 0.0,
-            "average_yield": 0.0,
+            "growth_stage": 0.0,
+            "health": 0.0,
+            "yield": 0.0,
+            "water_wasted": 0.0,
+            "fertilizer_wasted": 0.0,
+            "harvest_reward": 0.0,
         }
         
     
@@ -127,11 +130,13 @@ class Farm(gym.Env):
             "harvested_crops": 0,
             "water_used": 0.0,
             "fertilizer_used": 0.0,
-            "average_growth_stage": 0.0,
-            "average_health": 0.0,
-            "average_yield": 0.0,
+            "growth_stage": 0.0,
+            "health": 0.0,
+            "yield": 0.0,
             "water_wasted": 0.0,
             "fertilizer_wasted": 0.0,
+            "harvest_reward": 0.0,
+
         }
         return self._get_observation(), {}
 
@@ -147,10 +152,6 @@ class Farm(gym.Env):
         reward = 0
         terminated = False
         truncated = False
-        
-        # Weather and soil conditions
-        self.farm[:, 4] = np.clip(self.farm[:, 4] - 0.15, 0, 1)  # water evaporation
-        self.farm[:, 5] = np.clip(self.farm[:, 5] - 0.2 , 0, 1)  # fertilizer degradation        
         
         previous_water_supply = self.water_supply
         previous_fertilizer_supply = self.fertilizer_supply
@@ -236,11 +237,9 @@ class Farm(gym.Env):
         self.info_memory["fertilizer_used"] += (fertilizer_used)
         self.info_memory["water_wasted"] += water_wasted
         self.info_memory["fertilizer_wasted"] += fertilizer_wasted
-        
-        # running averages for growth stage, health, and yield
-        self.info_memory["average_growth_stage"] += np.mean(self.farm[:, 1]) # average growth stage
-        self.info_memory["average_health"] += np.mean(self.farm[:, 2]) # average health
-        self.info_memory["average_yield"] += np.sum(self.farm[:, 3]) # average yield
+        self.info_memory["growth_stage"] += np.mean(self.farm[:, 1]) # average growth stage
+        self.info_memory["health"] += np.mean(self.farm[:, 2]) # average health
+        self.info_memory["yield"] += np.sum(self.farm[:, 3]) # average yield
         
         
         # step bonus rewards
@@ -253,16 +252,14 @@ class Farm(gym.Env):
         planting_reward = planted_cells / self.total_cells * 1.4
         
         # step bonus for resource efficiency
-        water_efficiency = (water_used) * 1 # reward for efficient water use
+        water_efficiency = (water_used) * 1
         fertilizer_efficiency = (fertilizer_used) * 1
         
         # penalize water waste
         water_wasted_penalty = (water_wasted) * 1
         fertilizer_wasted_penalty = (fertilizer_wasted) * 1
-        
-        # reward for watering
-        # water_use_reward = ((previous_water_supply - curr_water_supply) / self.yearly_water_supply) * 5
-        
+
+        # REWARD COMPUTATION
         reward += yield_reward
         reward += water_efficiency + fertilizer_efficiency
         reward -= (water_wasted_penalty + fertilizer_wasted_penalty)
@@ -293,7 +290,8 @@ class Farm(gym.Env):
             # Harvest crops
             for i in range(self.total_cells):
                 if self.farm[i, 0] != -1:
-                    reward += (self.farm[i, 3] * self.CROP_TYPES[int(self.farm[i, 0])]["price"]) * 3
+                    harvest_reward = (self.farm[i, 3] * self.CROP_TYPES[int(self.farm[i, 0])]["price"]) * 3
+                    reward += harvest_reward
 
                     # remove the crop from the farm
                     self.farm[i, 0] = -1
@@ -301,7 +299,7 @@ class Farm(gym.Env):
                     self.farm[i, 2] = 0.0
                     self.farm[i, 3] = 0.0
                     self.info_memory["harvested_crops"] += 1
-            
+                    self.info_memory["harvest_reward"] += harvest_reward
             # replenish water and fertilizer supplies... what if we don't replenish yearly but let the agent manage the supplies?
             self.water_supply = self.yearly_water_supply
             self.fertilizer_supply = self.yearly_fertilizer_supply
@@ -322,8 +320,7 @@ class Farm(gym.Env):
         observation["current_year"] = self.current_year
         
         return observation, reward, terminated, truncated, self.info_memory      
-        
-        
+
 
 # register the environment
 register(
