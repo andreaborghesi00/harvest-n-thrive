@@ -6,13 +6,31 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import random
 import torch
+import signal
+import threading
 
 LEARNING_RATE = 3e-4
 GAMMA = 0.99  # Discount factor
 EPISODES = 1000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+EXPERIMENT_NAME = ""
+
+shutdown_flag = threading.Event()
+
+def on_sigint(signum, frame):
+    print("\nSIGINT received; will stop after this episode.")
+    shutdown_flag.set()
+    
+signal.signal(signal.SIGINT, on_sigint)
+        # if episode % BATCH_SIZE == 0:
+        #     print(f"Action stats: "
+        #         f"Water={action['water_amount'].mean():.2f}±{action['water_amount'].std():.2f} "
+        #         f"Fert={action['fertilizer_amount'].mean():.2f} "
+        #         f"CropMask={action['crop_mask'].mean():.2f} "
+        #         f"CropSel={action['crop_selection']}")
+
 
 def flatten_observation(obs, years):
     return np.concatenate([
@@ -58,6 +76,9 @@ def random_train(farm_env, years, episodes):
     state, _ = farm_env.reset()
     infos = []
     for episode in range(episodes):
+        if shutdown_flag.is_set():
+            break
+        
         obs, _ = farm_env.reset()
         state = flatten_observation(obs, years)
         terminated = False
@@ -80,15 +101,7 @@ def random_train(farm_env, years, episodes):
     pbar.close()
     print(mean_rewards)
     print(average_infos(infos))
-    np.save('random_mean_rewards.npy', mean_rewards)
-    plt.figure(figsize=(12, 6))
-    plt.plot(mean_rewards)
-    plt.xlabel('Episodes')
-    plt.ylabel('Mean Reward')
-    plt.title('Random mean rewards')
-    plt.grid()
-    plt.ylim(-3, 5)
-    plt.savefig('random_mean_rewards.png')
+    np.save(f'random_{EXPERIMENT_NAME}.npy', mean_rewards)
     
 def sample_step_info(farm_env, years):
     sample_obs, _ = farm_env.reset()
@@ -133,7 +146,7 @@ def main():
     print("Sample Action Shape:", flatten_action(sample_action).shape)
  
     random_train(farm_env, years, 50)
-    exit()
+
     agent = PolicyGradientAgent(state_dim=state_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA)
     
     eps_start   = 1.0      # start fully random
@@ -149,6 +162,9 @@ def main():
     infos = []
     state, _ = farm_env.reset()
     for episode in range(EPISODES):
+        if shutdown_flag.is_set():
+            break
+        
         obs, _ = farm_env.reset()
         state = flatten_observation(obs, years)
         terminated = False
@@ -186,17 +202,13 @@ def main():
         if (episode + 1) % BATCH_SIZE == 0:
             agent.update_policy()
             print(average_infos(infos[-BATCH_SIZE:]))
-        
-        if episode % BATCH_SIZE == 0:
-            print(f"Action stats: "
-                f"Water={action['water_amount'].mean():.2f}±{action['water_amount'].std():.2f} "
-                f"Fert={action['fertilizer_amount'].mean():.2f} "
-                f"CropMask={action['crop_mask'].mean():.2f} "
-                f"CropSel={action['crop_selection']}")
             
+    # save infos
+    np.save(f'reinforce_{EXPERIMENT_NAME}.npy', infos)
+    
     pbar.close()
     print(mean_rewards)
-    np.save('reinforce_mean_rewards.npy', mean_rewards)
+    np.save(f'reinforce_{EXPERIMENT_NAME}.npy', mean_rewards)
     
     plt.figure(figsize=(12, 6))
     plt.plot(mean_rewards)
@@ -204,7 +216,7 @@ def main():
     plt.ylabel('Mean Reward')
     plt.title('REINFORCE mean rewards')
     plt.grid()
-    plt.ylim(-3, 5)
+    plt.ylim(-15, 10)
     plt.savefig('reinforce_mean_rewards.png')
     
     # print(fertilizer_reserve)
