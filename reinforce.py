@@ -4,8 +4,6 @@ import torch.optim as optim
 import math
 from typing import Dict, Any
 
-# EXPLORATION_COEFFICIENT = 0.25
-# EXPLORATION_COEFFICIENT_DECAY = 0.95
 BETA_MAX = 0.2
 BETA_MIN = 0.01
 BETA_T = 150  # Number of steps for one cycle of beta
@@ -23,43 +21,86 @@ class ResidualBlock(nn.Module):
     def forward(self, x):
         return x + self.block(x)
 
-# class HybridPolicyNetwork(nn.Module):
-#     def __init__(self, input_dim, total_cells):
-#         super().__init__()
-#         self.total_cells = total_cells
-#         self.shared =nn.Sequential(
-#             nn.Linear(input_dim, 256),
-#             nn.LayerNorm(256),
-#             nn.SiLU(inplace=True),
+class ICM(nn.Module):
+    """
+    Intrinsic Curiosity Module (ICM)
+    Ref: Pathak et al. (2017)
+    """
+    def __init__(self, state_dim, action_dim, feature_dim=128, lr=1e-3, beta=0.2, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+        super().__init__()
+        self.device = device
+        self.beta = beta  # weighting between forward & inverse losses
+        # Feature encoder phi(s)
+        self.encoder = nn.Sequential(
+            nn.Linear(state_dim, 256),
+            nn.ELU(inplace=True),
+            nn.Linear(256, feature_dim),
+            nn.ELU(inplace=True)
+        )
+        # Inverse model: phi(s), phi(s') -> predict action
+        self.inverse = nn.Sequential(
+            nn.Linear(2*feature_dim, 256),
+            nn.ELU(inplace=True),
+            nn.Linear(256, action_dim)
+        )
+        # Forward model: phi(s), action -> predict phi(s')
+        self.forward_model = nn.Sequential(
+            nn.Linear(feature_dim + action_dim, 256),
+            nn.ELU(inplace=True),
+            nn.Linear(256, feature_dim)
+        )
+        self.optimizer = optim.Adam(self.parameters(), lr=lr)
+        self.mse = nn.MSELoss()
+        self.ce = nn.CrossEntropyLoss()
 
-#             nn.Linear(256, 512),
-#             nn.LayerNorm(512),
-#             nn.SiLU(inplace=True),
+    def forward(self, state, next_state, action):
+        """
+        Given raw states and action, compute the intrinsic reward
+        """
+        # state, next_state and action to tensors
+        state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        next_state = torch.tensor(next_state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        action = torch.tensor(action, dtype=torch.float32, device=self.device).unsqueeze(0)
+        
+        # encode state features
+        phi_s  = self.encoder(state)
+        phi_s2 = self.encoder(next_state)
+        
+        # inverse reconstruction loss (regression): what action do you think was taken to go from s to s'?
+        inv_in     = torch.cat([phi_s, phi_s2], dim=-1)
+        action_pred = self.inverse(inv_in)
+        inv_loss   = self.mse(action_pred, action)
+        
+        # forward prediction loss: given s and action, what is the next state (its embedding)?
+        fwd_in       = torch.cat([phi_s.detach(), action], dim=-1)
+        phi_s2_pred  = self.forward_model(fwd_in)
+        fwd_loss     = self.mse(phi_s2_pred, phi_s2.detach())
+        # intrinsic reward: scaled forward error. If phi_s2_pred is not close to phi_s2, then the agent hasn't learned to predict the next state well, hence we make it curious
+        r_int = 0.5 * (phi_s2_pred - phi_s2).pow(2).sum(dim=-1)
+        return r_int, inv_loss, fwd_loss
+    
+    def compute_intrinsic_reward(self, state, next_state, action):
+        """Returns intrinsic reward, detached from graph."""
+        r_int, _, _ = self.forward(state, next_state, action)
+        return r_int.detach().cpu().numpy()
 
-#             nn.Linear(512, 1024),
-#             nn.LayerNorm(1024),
-#             nn.SiLU(inplace=True),
-#             ResidualBlock(1024),
-#             nn.Linear(1024, 512),
-#             nn.LayerNorm(512),
-#             nn.SiLU(inplace=True),
+    def update(self, state, next_state, action):
+        """
+        Takes batches of transitions and updates ICM parameters.
+        Returns intrinsic rewards.
+        """
+        state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        next_state = torch.tensor(next_state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        action = torch.tensor(action, dtype=torch.float32, device=self.device).unsqueeze(0)
+        
+        r_int, inv_loss, fwd_loss = self.forward(state, next_state, action)
+        # combined ICM loss, we use the beta found in the paper
+        loss = (1 - self.beta) * inv_loss + self.beta * fwd_loss
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return r_int.detach()
 
-#             nn.Linear(512, 256),
-#             nn.LayerNorm(256),
-#             nn.SiLU(inplace=True),
-#             ResidualBlock(256),
-#         )
-        
-#         # Continuous heads
-#         self.water_head = nn.Linear(256, total_cells)
-#         self.fertilizer_head = nn.Linear(256, total_cells)
-        
-#         self.water_log_std = nn.Parameter(torch.zeros(total_cells))
-#         self.fertilizer_log_std = nn.Parameter(torch.zeros(total_cells))
-        
-#         # Discrete heads
-#         self.crop_mask_head = nn.Linear(256, total_cells)
-#         self.crop_select_head = nn.Linear(256, 4)  # 4 crop types
 
 
 class HybridPolicyNetwork(nn.Module):
@@ -111,15 +152,16 @@ class HybridPolicyNetwork(nn.Module):
         return water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits, crop_select_logits
 
 class PolicyGradientAgent:
-    def __init__(self, state_dim, total_cells, learning_rate: float = 3e-4, gamma: float = .99, episodes: int = 1000, batch_size: int = 10, device=torch.device("cuda") if torch.cuda.is_available() else "cpu"):
+    def __init__(self, action_dim, state_dim, total_cells, learning_rate: float = 3e-4, gamma: float = .99, episodes: int = 1000, batch_size: int = 10, device=torch.device("cuda") if torch.cuda.is_available() else "cpu"):
         self.device = device
         self.policy = HybridPolicyNetwork(state_dim, total_cells).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=20, verbose=True)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=20)
         # self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=episodes/batch_size, eta_min=1e-5)
         self.memory = []  # Stores (log_prob, reward, state)
         self.gamma = gamma
         self.episode = 0
+        self.icm = ICM(state_dim=state_dim, action_dim=action_dim, device=self.device).to(self.device)
 
     def select_action_hybrid(self, state):
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
@@ -188,9 +230,9 @@ class PolicyGradientAgent:
         for (log_prob, _, _, entropy), R in zip(self.memory, returns):
             advantage = R - baseline  
 
-            exploration_bonus = self.beta_cycle(T=BETA_T, beta_max=BETA_MAX, beta_min=BETA_MIN) * entropy
-
-            policy_loss.append(-log_prob * advantage - exploration_bonus)  # Gradient ascent
+            # exploration_bonus = self.beta_cycle(T=BETA_T, beta_max=BETA_MAX, beta_min=BETA_MIN) * entropy
+            # policy_loss.append(-log_prob * advantage - exploration_bonus)  # Gradient ascent
+            policy_loss.append(-log_prob * advantage) # no exploration bonus for now
 
         self.optimizer.zero_grad()
         policy_loss = torch.cat(policy_loss).sum()

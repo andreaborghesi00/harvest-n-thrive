@@ -15,7 +15,9 @@ EPISODES = 10000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EXPERIMENT_NAME = "beta_cycle_water_waste_yield_reward"
+EXPERIMENT_NAME = "icm"
+# For ICM
+ETA = 4.0  # Weighting between forward & inverse losses
 
 shutdown_flag = threading.Event()
 
@@ -140,14 +142,15 @@ def main():
     
     total_cells = farm_size[0] * farm_size[1]
     state_dim = flatten_observation(sample_obs, years).shape[0] # total_cells * 6 + 5
+    action_dim = flatten_action(sample_action).shape[0] # total_cells * 2 + 1 + 1
     
     print("Predicted Observation Space Shape:", (state_dim,))
     print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
     print("Sample Action Shape:", flatten_action(sample_action).shape)
  
-    random_train(farm_env, years, 50)
+    # random_train(farm_env, years, 50)
 
-    agent = PolicyGradientAgent(state_dim=state_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA, device=DEVICE)
+    agent = PolicyGradientAgent(state_dim=state_dim, action_dim=action_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA, device=DEVICE)
     
     eps_start   = 1.0      # start fully random
     eps_end     = 0.1      # end with some randomness
@@ -184,8 +187,14 @@ def main():
                 
             # next_state, reward, terminated, truncated, info = farm_env.step(agent_action_to_env(action=action, total_cells=total_cells))
             next_state, reward, terminated, truncated, info = farm_env.step(action)
+            next_state = flatten_observation(next_state, years)
+            
+            r_int = agent.icm.compute_intrinsic_reward(state, next_state, flatten_action(action))
+            reward += ETA * r_int
             agent.store_outcome(log_prob, reward, state, entropy)
-            state = flatten_observation(next_state, years)
+            
+            agent.icm.update(state=state, next_state=next_state, action=flatten_action(action))
+            state = next_state
             
             rewards.append(reward)
         
