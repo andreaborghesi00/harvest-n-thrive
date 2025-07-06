@@ -111,8 +111,8 @@ class HybridPolicyNetwork(nn.Module):
         return water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits, crop_select_logits
 
 class PolicyGradientAgent:
-    def __init__(self, state_dim, total_cells, learning_rate: float = 3e-4, gamma: float = .99, episodes: int = 1000, batch_size: int = 10):
-        self.device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    def __init__(self, state_dim, total_cells, learning_rate: float = 3e-4, gamma: float = .99, episodes: int = 1000, batch_size: int = 10, device=torch.device("cuda") if torch.cuda.is_available() else "cpu"):
+        self.device = device
         self.policy = HybridPolicyNetwork(state_dim, total_cells).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=20, verbose=True)

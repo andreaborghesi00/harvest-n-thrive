@@ -14,8 +14,8 @@ GAMMA = 0.99  # Discount factor
 EPISODES = 10000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-EXPERIMENT_NAME = "beta_cycle_higher_end_rewards"
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+EXPERIMENT_NAME = "beta_cycle_water_waste_yield_reward"
 
 shutdown_flag = threading.Event()
 
@@ -147,7 +147,7 @@ def main():
  
     random_train(farm_env, years, 50)
 
-    agent = PolicyGradientAgent(state_dim=state_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA)
+    agent = PolicyGradientAgent(state_dim=state_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA, device=DEVICE)
     
     eps_start   = 1.0      # start fully random
     eps_end     = 0.1      # end with some randomness
@@ -157,8 +157,6 @@ def main():
     
     pbar = tqdm(total=EPISODES, desc="Training", unit="step")
     mean_rewards = []
-    water_reserve = []
-    fertilizer_reserve = []
     infos = []
     state, _ = farm_env.reset()
     for episode in range(EPISODES):
