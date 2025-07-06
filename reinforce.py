@@ -1,13 +1,14 @@
-import gymnasium as gym
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
-import cv2
+import math
+from typing import Dict, Any
 
-EXPLORATION_COEFFICIENT = 0.2
-EXPLORATION_COEFFICIENT_DECAY = 0.99
+# EXPLORATION_COEFFICIENT = 0.25
+# EXPLORATION_COEFFICIENT_DECAY = 0.95
+BETA_MAX = 0.2
+BETA_MIN = 0.01
+BETA_T = 150  # Number of steps for one cycle of beta
 
 class ResidualBlock(nn.Module):
     def __init__(self, dim):
@@ -110,13 +111,15 @@ class HybridPolicyNetwork(nn.Module):
         return water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits, crop_select_logits
 
 class PolicyGradientAgent:
-    def __init__(self, state_dim, total_cells, learning_rate: float = 3e-4, gamma: float = .99):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(self, state_dim, total_cells, learning_rate: float = 3e-4, gamma: float = .99, episodes: int = 1000, batch_size: int = 10):
+        self.device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
         self.policy = HybridPolicyNetwork(state_dim, total_cells).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=20, verbose=True)
+        # self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=episodes/batch_size, eta_min=1e-5)
         self.memory = []  # Stores (log_prob, reward, state)
         self.gamma = gamma
+        self.episode = 0
 
     def select_action_hybrid(self, state):
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
@@ -156,11 +159,16 @@ class PolicyGradientAgent:
         ) / 4
         return action, log_prob, entropy
         
+    def beta_cycle(self, T=150, beta_min=0.01, beta_max=0.2):
+        t = self.episode % T
+        cos_out = (1 + math.cos(math.pi * t / T)) / 2 # 1+ brings it to [0, 2], then divide by 2 to bring it to [0, 1]
+        return beta_min + (beta_max - beta_min) * (cos_out) # it does half the cycle, so it goes from beta_max to beta_min slowly and back to beta_max instantly, like CosineAnnealingWithWarmRestarts
+    
     def store_outcome(self, log_prob, reward, state, entropy):
         self.memory.append((log_prob, reward, state, entropy))
 
     def update_policy(self):
-        global EXPLORATION_COEFFICIENT
+        # global EXPLORATION_COEFFICIENT
         R = 0  # Discounted return
         policy_loss = []
         returns = []
@@ -180,7 +188,7 @@ class PolicyGradientAgent:
         for (log_prob, _, _, entropy), R in zip(self.memory, returns):
             advantage = R - baseline  
 
-            exploration_bonus = EXPLORATION_COEFFICIENT * entropy
+            exploration_bonus = self.beta_cycle(T=BETA_T, beta_max=BETA_MAX, beta_min=BETA_MIN) * entropy
 
             policy_loss.append(-log_prob * advantage - exploration_bonus)  # Gradient ascent
 
@@ -194,8 +202,8 @@ class PolicyGradientAgent:
         self.scheduler.step(episode_reward)
         
         # Exploration coefficient decay
-        EXPLORATION_COEFFICIENT *= EXPLORATION_COEFFICIENT_DECAY
-        EXPLORATION_COEFFICIENT = max(EXPLORATION_COEFFICIENT, 0.01)
+        # EXPLORATION_COEFFICIENT *= EXPLORATION_COEFFICIENT_DECAY
+        # EXPLORATION_COEFFICIENT = max(EXPLORATION_COEFFICIENT, 0.01)
         
         # Clear memory after updating policy
         self.memory = []

@@ -11,11 +11,11 @@ import threading
 
 LEARNING_RATE = 3e-4
 GAMMA = 0.99  # Discount factor
-EPISODES = 1000  # Number of training episodes
+EPISODES = 10000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-EXPERIMENT_NAME = ""
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+EXPERIMENT_NAME = "beta_cycle_epsilon_greedy"
 
 shutdown_flag = threading.Event()
 
@@ -165,12 +165,12 @@ def main():
         if shutdown_flag.is_set():
             break
         
-        obs, _ = farm_env.reset()
+        obs, _ = farm_env.reset(options={'episode': episode})
         state = flatten_observation(obs, years)
         terminated = False
         truncated = False
         rewards = []
-        
+        agent.episode = episode  # Update the current episode for beta cycle
         while not (terminated or truncated):
             # action = farm_env.action_space.sample()
             
