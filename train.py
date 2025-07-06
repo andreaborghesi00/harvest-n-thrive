@@ -202,11 +202,11 @@ def main():
             print(average_infos(infos[-BATCH_SIZE:]))
             
     # save infos
-    np.save(f'reinforce_{EXPERIMENT_NAME}.npy', infos)
+    np.save(f'reinforce_{EXPERIMENT_NAME}_infos.npy', infos)
     
     pbar.close()
     print(mean_rewards)
-    np.save(f'reinforce_{EXPERIMENT_NAME}.npy', mean_rewards)
+    np.save(f'reinforce_{EXPERIMENT_NAME}_rewards.npy', mean_rewards)
     
     plt.figure(figsize=(12, 6))
     plt.plot(mean_rewards)
