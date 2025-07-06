@@ -2,7 +2,7 @@ import numpy as np
 import gymnasium as gym
 from typing import Tuple, Any, Dict, Optional, List
 from gymnasium.envs.registration import register
-
+import math
 """
 Problem Description:
 In this resource management game, the agent must allocate resources such as water, fertilizer, and labor to optimize crop growth while managing limited supplies in a farm. Each turn, the environmnet dynamically changes with fluctuating weather conditions, soil health variations, and shifting market prices, requiring the agent to adapt its strategy accordingly. Overwatering may lead to crop diseases, while under-fertilization slows growth and reduces tield, depending on the crops and the weather and soil conditions. At the end of each year, the farm production is sold and this represents the reward that the agent wants to maximize in the long-term (i.e. after a certain number of years in an episodic setting).
@@ -37,7 +37,7 @@ class Farm(gym.Env):
         self.yearly_water_supply = yearly_water_supply
         self.yearly_fertilizer_supply = yearly_fertilizer_supply
         self.yearly_labor_supply = yearly_labor_supply
-        
+        self.episode = None
         # penalties
         self.dead_crop_penalty = 3
         self.unwatered_crop_penalty = 1.5
@@ -111,7 +111,7 @@ class Farm(gym.Env):
     def reset(self, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
         super().reset(seed=seed)
         np.random.seed(seed)
-        
+        self.episode = options.get("episode", None) if options else None
         self.farm = np.zeros(shape=(self.total_cells, 6), dtype=np.float32)  # [crop_id, growth_stage, health, yield, water, fertilizer]
         self.farm[:, 0] = -1  # No crop planted
         self.water_supply = self.yearly_water_supply
@@ -152,7 +152,8 @@ class Farm(gym.Env):
         
         previous_water_supply = self.water_supply
         previous_fertilizer_supply = self.fertilizer_supply
-        
+        water_wasted = 0
+        fertilizer_wasted = 0
         # Apply actions to the farm
         for i in range(self.total_cells):
             if crop_mask[i] == 1 and self.farm[i, 0] == -1:
@@ -168,11 +169,18 @@ class Farm(gym.Env):
                 water_used = min(water_amount[i], self.water_supply)
                 self.farm[i, 4] += water_used
                 self.water_supply -= water_used
+                if self.farm[i, 0] == -1:
+                    # if the cell is empty, water is wasted
+                    water_wasted += water_used
                 
             if fertilizer_amount[i] > 0:
                 fertilizer_used = min(fertilizer_amount[i], self.fertilizer_supply)
                 self.farm[i, 5] += fertilizer_used
                 self.fertilizer_supply -= fertilizer_used
+                
+                if self.farm[i, 0] == -1:
+                    # if the cell is empty, fertilizer is wasted
+                    fertilizer_wasted += fertilizer_used
                 
             # clip the water and fertilizer to 1
             self.farm[i, 4] = np.clip(self.farm[i, 4], 0, 1)
@@ -217,8 +225,11 @@ class Farm(gym.Env):
         curr_water_supply = self.water_supply
         curr_fertilizer_supply = self.fertilizer_supply
         
-        self.info_memory["water_used"] = (previous_water_supply - curr_water_supply)
-        self.info_memory["fertilizer_used"] = (previous_fertilizer_supply - curr_fertilizer_supply)
+        water_used = previous_water_supply - curr_water_supply
+        fertilizer_used = previous_fertilizer_supply - curr_fertilizer_supply
+        
+        self.info_memory["water_used"] += (previous_water_supply - curr_water_supply)
+        self.info_memory["fertilizer_used"] += (previous_fertilizer_supply - curr_fertilizer_supply)
         
         # running averages for growth stage, health, and yield
         self.info_memory["average_growth_stage"] += 1./52. * np.mean(self.farm[:, 1]) # average growth stage
@@ -229,22 +240,26 @@ class Farm(gym.Env):
         # step bonus rewards
         growth_reward = np.mean(self.farm[:, 1]) * 1.3 # reward for growing crops
         health_reward = np.mean(self.farm[:, 2]) * 1.4 # reward for healthy crops
-        yield_reward = np.mean(self.farm[:, 3]) * 1.2 # reward for yield
+        yield_reward = np.sum(self.farm[:, 3]) * 1.2 # reward for yield, we really want to encourage the agent to grow crops that yield more
         
         # good management rewards
         planted_cells = np.sum(self.farm[:, 0] >= 0)
-        planting_reward = planted_cells / self.total_cells * 1.2
+        planting_reward = planted_cells / self.total_cells * 1.4
         
         # step bonus for resource efficiency
-        # water_efficiency = (self.water_supply / self.yearly_water_supply) * 1.1 # reward for efficient water use
-        # fertilizer_efficiency = (self.fertilizer_supply / self.yearly_fertilizer_supply) * 1.1
+        water_efficiency = (water_used / self.yearly_water_supply) * 1.1 # reward for efficient water use
+        fertilizer_efficiency = (fertilizer_used / self.yearly_fertilizer_supply) * 1.1
+        
+        # penalize water waste
+        water_wasted_penalty = (water_wasted / self.yearly_water_supply) * 2.0
+        fertilizer_wasted_penalty = (fertilizer_wasted / self.yearly_fertilizer_supply) * 2.0
         
         # reward for watering
-        water_use_reward = ((previous_water_supply - curr_water_supply) / self.yearly_water_supply) * 100
+        # water_use_reward = ((previous_water_supply - curr_water_supply) / self.yearly_water_supply) * 5
         
         reward += health_reward + growth_reward + yield_reward
-        # reward += water_efficiency + fertilizer_efficiency
-        reward += water_use_reward
+        reward += water_efficiency + fertilizer_efficiency
+        reward -= (water_wasted_penalty + fertilizer_wasted_penalty)
         reward += planting_reward
         
         # end of week: the soil dries and the crops consume the fertilizer
@@ -263,10 +278,7 @@ class Farm(gym.Env):
                 self.farm[i, 4] = max(self.farm[i, 4] - 0.4, 0.0)
                 self.farm[i, 5] = max(self.farm[i, 5] - 0.4, 0.0)
                 
-                
         
-        
-        # Time step # TODO: a "partial" reward comes after each week when with the harvest mask, a non-sparse reward is better for monte carlo methods
         self.current_week += 1
         if (self.current_week % 52) == 0:
             self.current_week = 0
@@ -275,7 +287,7 @@ class Farm(gym.Env):
             # Harvest crops
             for i in range(self.total_cells):
                 if self.farm[i, 0] != -1:
-                    reward += self.farm[i, 3] * self.CROP_TYPES[int(self.farm[i, 0])]["price"]
+                    reward += (self.farm[i, 3] * self.CROP_TYPES[int(self.farm[i, 0])]["price"]) * 3
 
                     # remove the crop from the farm
                     self.farm[i, 0] = -1
