@@ -24,10 +24,10 @@ Implementation notes:
 """
 class Farm(gym.Env):
     CROP_TYPES = {
-        0: {"name": "wheat", "growth_time": 28, "base_yield": 0.8, "water_need": 1.6, "fertilizer_need": 0.5, "price": 10},
-        1: {"name": "corn", "growth_time": 42, "base_yield": 0.9, "water_need": 1.7, "fertilizer_need": 0.6, "price": 15},
-        2: {"name": "tomato", "growth_time": 35, "base_yield": 0.7, "water_need": 1.8, "fertilizer_need": 0.7, "price": 20},
-        3: {"name": "potato", "growth_time": 30, "base_yield": 0.85, "water_need": 1.5, "fertilizer_need": 0.4, "price": 12},
+        0: {"name": "wheat", "growth_time": 28, "base_yield": 0.8, "water_need": 0.6, "fertilizer_need": 0.5, "price": 10},
+        1: {"name": "corn", "growth_time": 42, "base_yield": 0.9, "water_need": 0.7, "fertilizer_need": 0.6, "price": 15},
+        2: {"name": "tomato", "growth_time": 35, "base_yield": 0.7, "water_need": 0.8, "fertilizer_need": 0.7, "price": 20},
+        3: {"name": "potato", "growth_time": 30, "base_yield": 0.85, "water_need": 0.5, "fertilizer_need": 0.4, "price": 12},
     }
     
     def __init__(self, farm_size=(10, 10), years=10, yearly_water_supply=1000, yearly_fertilizer_supply=500, yearly_labor_supply=100):
@@ -130,6 +130,8 @@ class Farm(gym.Env):
             "average_growth_stage": 0.0,
             "average_health": 0.0,
             "average_yield": 0.0,
+            "water_wasted": 0.0,
+            "fertilizer_wasted": 0.0,
         }
         return self._get_observation(), {}
 
@@ -195,6 +197,7 @@ class Farm(gym.Env):
                 fertilizer_need = self.CROP_TYPES[crop_id]["fertilizer_need"]
                 base_yield = self.CROP_TYPES[crop_id]["base_yield"]
                 growth_step = 1 / growth_time
+                # print(f"Growth step: {growth_step}")
                 
                 if self.farm[i, 4] >= water_need: # TODO: handle overwatering
                     # Compatible with life
@@ -203,6 +206,7 @@ class Farm(gym.Env):
                     self.farm[i, 1] = min(self.farm[i,1] + growth_step * growth_mutliplier, 1.0)
                     self.farm[i, 2] = min(self.farm[i, 2] + 0.1, 1.0)
                     self.farm[i, 3] += base_yield * growth_step * 1.25 if self.farm[i, 5] >= fertilizer_need else base_yield * growth_step
+                    # print(f"Yield: {self.farm[i, 3]}")
                 else:
                     # Not enough water: growth stale, health and yield reduced
                     self.farm[i, 2] -= 0.2
@@ -225,21 +229,23 @@ class Farm(gym.Env):
         curr_water_supply = self.water_supply
         curr_fertilizer_supply = self.fertilizer_supply
         
-        water_used = previous_water_supply - curr_water_supply
-        fertilizer_used = previous_fertilizer_supply - curr_fertilizer_supply
+        water_used = previous_water_supply - curr_water_supply - water_wasted
+        fertilizer_used = previous_fertilizer_supply - curr_fertilizer_supply - fertilizer_wasted
         
-        self.info_memory["water_used"] += (previous_water_supply - curr_water_supply)
-        self.info_memory["fertilizer_used"] += (previous_fertilizer_supply - curr_fertilizer_supply)
+        self.info_memory["water_used"] += (water_used)
+        self.info_memory["fertilizer_used"] += (fertilizer_used)
+        self.info_memory["water_wasted"] += water_wasted
+        self.info_memory["fertilizer_wasted"] += fertilizer_wasted
         
         # running averages for growth stage, health, and yield
-        self.info_memory["average_growth_stage"] += 1./52. * np.mean(self.farm[:, 1]) # average growth stage
-        self.info_memory["average_health"] += 1./52. * np.mean(self.farm[:, 2]) # average health
-        self.info_memory["average_yield"] += 1./52. * np.mean(self.farm[:, 3]) # average yield
+        self.info_memory["average_growth_stage"] += np.mean(self.farm[:, 1]) # average growth stage
+        self.info_memory["average_health"] += np.mean(self.farm[:, 2]) # average health
+        self.info_memory["average_yield"] += np.sum(self.farm[:, 3]) # average yield
         
         
         # step bonus rewards
-        growth_reward = np.mean(self.farm[:, 1]) * 1.3 # reward for growing crops
-        health_reward = np.mean(self.farm[:, 2]) * 1.4 # reward for healthy crops
+        # growth_reward = np.mean(self.farm[:, 1]) * 1.3 # reward for growing crops
+        # health_reward = np.mean(self.farm[:, 2]) * 1.4 # reward for healthy crops
         yield_reward = np.sum(self.farm[:, 3]) * 1.2 # reward for yield, we really want to encourage the agent to grow crops that yield more
         
         # good management rewards
@@ -247,17 +253,17 @@ class Farm(gym.Env):
         planting_reward = planted_cells / self.total_cells * 1.4
         
         # step bonus for resource efficiency
-        water_efficiency = (water_used / self.yearly_water_supply) * 1.1 # reward for efficient water use
-        fertilizer_efficiency = (fertilizer_used / self.yearly_fertilizer_supply) * 1.1
+        water_efficiency = (water_used) * 1 # reward for efficient water use
+        fertilizer_efficiency = (fertilizer_used) * 1
         
         # penalize water waste
-        water_wasted_penalty = (water_wasted / self.yearly_water_supply) * 2.0
-        fertilizer_wasted_penalty = (fertilizer_wasted / self.yearly_fertilizer_supply) * 2.0
+        water_wasted_penalty = (water_wasted) * 1
+        fertilizer_wasted_penalty = (fertilizer_wasted) * 1
         
         # reward for watering
         # water_use_reward = ((previous_water_supply - curr_water_supply) / self.yearly_water_supply) * 5
         
-        reward += health_reward + growth_reward + yield_reward
+        reward += yield_reward
         reward += water_efficiency + fertilizer_efficiency
         reward -= (water_wasted_penalty + fertilizer_wasted_penalty)
         reward += planting_reward
