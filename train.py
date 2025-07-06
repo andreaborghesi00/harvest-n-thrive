@@ -14,8 +14,8 @@ GAMMA = 0.99  # Discount factor
 EPISODES = 10000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
-DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-EXPERIMENT_NAME = "beta_cycle_epsilon_greedy"
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+EXPERIMENT_NAME = "beta_cycle_higher_end_rewards"
 
 shutdown_flag = threading.Event()
 
@@ -174,8 +174,8 @@ def main():
         while not (terminated or truncated):
             # action = farm_env.action_space.sample()
             
-            if random.random() < epsilon:
-            # if False:
+            # if random.random() < epsilon:
+            if False:
                 # exploration
                 action = farm_env.action_space.sample()
                 log_prob = torch.tensor([0.0], device=agent.device)
