@@ -17,7 +17,7 @@ HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EXPERIMENT_NAME = "icm"
 # For ICM
-ETA = 4.0  # Weighting between forward & inverse losses
+ETA = 4.0  # Weighting between internal curiosity and external reward
 
 shutdown_flag = threading.Event()
 
@@ -134,8 +134,10 @@ def sample_step_info(farm_env, years):
 
 def main():
     years = 10
-    farm_size = (3, 3)
-    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=9*52, yearly_fertilizer_supply=5*52, yearly_labor_supply=1000)
+    farm_size = (6,6)
+    weekly_water_supply = farm_size[0] * farm_size[1] * 0.75  # 0.5 water per cell per week
+    weekly_fertilizer_supply = farm_size[0] * farm_size[1] * 0.5  # 0.5 fertilizer per cell per week
+    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=weekly_water_supply*52, yearly_fertilizer_supply=weekly_fertilizer_supply*52, yearly_labor_supply=1000)
     
     sample_obs, _ = farm_env.reset()
     sample_action = farm_env.action_space.sample()
@@ -148,7 +150,7 @@ def main():
     print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
     print("Sample Action Shape:", flatten_action(sample_action).shape)
  
-    # random_train(farm_env, years, 50)
+    random_train(farm_env, years, 50)
 
     agent = PolicyGradientAgent(state_dim=state_dim, action_dim=action_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA, device=DEVICE)
     
@@ -172,6 +174,8 @@ def main():
         truncated = False
         rewards = []
         agent.episode = episode  # Update the current episode for beta cycle
+        r_ints = []
+        r_exts = [] 
         while not (terminated or truncated):
             # action = farm_env.action_space.sample()
             
@@ -190,6 +194,8 @@ def main():
             next_state = flatten_observation(next_state, years)
             
             r_int = agent.icm.compute_intrinsic_reward(state, next_state, flatten_action(action))
+            r_ints.append(r_int)
+            r_exts.append(reward)
             reward += ETA * r_int
             agent.store_outcome(log_prob, reward, state, entropy)
             
@@ -199,7 +205,11 @@ def main():
             rewards.append(reward)
         
         pbar.update(1)
-        pbar.set_postfix(reward=np.mean(rewards))
+        pbar.set_postfix({
+            "tot_reward": np.mean(rewards),
+            "int": np.mean(r_ints),
+            "ext": np.mean(r_exts),
+        })
         mean_rewards.append(np.mean(rewards))
         infos.append(info)
         # Decay epsilon
