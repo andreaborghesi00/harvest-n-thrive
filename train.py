@@ -39,7 +39,7 @@ def flatten_observation(obs, years):
         obs['farm_state'].flatten(),
         obs['water_supply'],
         obs['fertilizer_supply'],
-        obs['labor_supply'],
+        obs['labour_supply'],
         [obs['current_week'] / 52],
         [obs['current_year'] / years]
     ])
@@ -134,8 +134,11 @@ def sample_step_info(farm_env, years):
 
 def main():
     years = 10
-    farm_size = (3, 3)
-    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=9*52, yearly_fertilizer_supply=5*52, yearly_labor_supply=1000)
+    farm_size = (6,6)
+    weekly_water = farm_size[0] * farm_size[1] * 0.7
+    weekly_fertilizer = farm_size[0] * farm_size[1] * 0.5
+    weekly_labour = farm_size[0] * farm_size[1] * 1.5  # 1.5 allows for planting+(watering or fertilizing) or watering+fertilizing, not all three at once
+    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=weekly_water*52, yearly_fertilizer_supply=weekly_fertilizer*52, weekly_labour_supply=1000)
     
     sample_obs, _ = farm_env.reset()
     sample_action = farm_env.action_space.sample()
@@ -147,8 +150,8 @@ def main():
     print("Predicted Observation Space Shape:", (state_dim,))
     print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
     print("Sample Action Shape:", flatten_action(sample_action).shape)
- 
-    # random_train(farm_env, years, 50)
+    print(f"Device: {DEVICE}")
+    random_train(farm_env, years, 50)
 
     agent = PolicyGradientAgent(state_dim=state_dim, action_dim=action_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA, device=DEVICE)
     
