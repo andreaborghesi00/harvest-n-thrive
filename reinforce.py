@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import math
 from typing import Dict, Any
+import numpy as np
 
 BETA_MAX = 0.2
 BETA_MIN = 0.01
@@ -154,7 +155,7 @@ class HybridPolicyNetwork(nn.Module):
 class PolicyGradientAgent:
     def __init__(self, action_dim, state_dim, total_cells, learning_rate: float = 3e-4, gamma: float = .99, episodes: int = 1000, batch_size: int = 10, device=torch.device("cuda") if torch.cuda.is_available() else "cpu"):
         self.device = device
-        self.policy = HybridPolicyNetwork(state_dim, total_cells).to(self.device)
+        self.policy = torch.jit.script(HybridPolicyNetwork(state_dim, total_cells).to(self.device))
         self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=20)
         # self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=episodes/batch_size, eta_min=1e-5)
@@ -220,13 +221,13 @@ class PolicyGradientAgent:
             R = reward + self.gamma * R
             returns.insert(0, R) # head insertion so that we get the correct order
 
+        returns = np.array(returns, dtype=np.float32)
         returns = torch.tensor(returns).to(self.device)
 
         returns = (returns - returns.mean()) / (returns.std() + 1e-5)
 
         baseline = sum(returns) / len(returns)
 
-        # Compute policy gradient loss with advantage function
         for (log_prob, _, _, entropy), R in zip(self.memory, returns):
             advantage = R - baseline  
 
