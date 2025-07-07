@@ -137,8 +137,8 @@ def main():
     farm_size = (6,6)
     weekly_water = farm_size[0] * farm_size[1] * 0.7
     weekly_fertilizer = farm_size[0] * farm_size[1] * 0.5
-    weekly_labour = farm_size[0] * farm_size[1] * 1.5  # 1.5 allows for planting+(watering or fertilizing) or watering+fertilizing, not all three at once
-    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=weekly_water*52, yearly_fertilizer_supply=weekly_fertilizer*52, weekly_labour_supply=1000)
+    weekly_labour = farm_size[0] * farm_size[1] * 10000  # 1.5 allows for planting+(watering or fertilizing) or watering+fertilizing, not all three at once
+    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=weekly_water*52, yearly_fertilizer_supply=weekly_fertilizer*52, weekly_labour_supply=weekly_labour)
     
     sample_obs, _ = farm_env.reset()
     sample_action = farm_env.action_space.sample()
@@ -166,6 +166,8 @@ def main():
     infos = []
     state, _ = farm_env.reset()
     for episode in range(EPISODES):
+        r_ints = []
+        r_exts = []
         if shutdown_flag.is_set():
             break
         
@@ -193,6 +195,8 @@ def main():
             next_state = flatten_observation(next_state, years)
             
             r_int = agent.icm.compute_intrinsic_reward(state, next_state, flatten_action(action))
+            r_ints.append(r_int)
+            r_exts.append(reward)
             reward += ETA * r_int
             agent.store_outcome(log_prob, reward, state, entropy)
             
@@ -202,7 +206,11 @@ def main():
             rewards.append(reward)
         
         pbar.update(1)
-        pbar.set_postfix(reward=np.mean(rewards))
+        pbar.set_postfix({
+            "tot_reward": np.mean(rewards),
+            "ext": np.mean(r_exts),
+            "int": np.mean(r_ints),
+        })
         mean_rewards.append(np.mean(rewards))
         infos.append(info)
         # Decay epsilon
