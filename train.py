@@ -47,20 +47,11 @@ def flatten_observation(obs, years):
 def flatten_action(action):
     return np.concatenate([
         action['crop_mask'].flatten(),
-        [action['crop_selection']],
+        # [action['crop_selection']],
         # action['harvest_mask'].flatten(),
         action['water_amount'].flatten(),
         action['fertilizer_amount'].flatten()
     ])
-    
-
-def agent_action_to_env(action, total_cells):
-    return {
-        'crop_mask': (action[:total_cells] > 0).astype(int),  # Threshold at 0
-        'crop_selection': np.clip(np.round(action[2*total_cells]), 0, 3).astype(int),
-        'water_amount': (action[total_cells:2*total_cells] + 1) / 2,  # Scale to [0,1]
-        'fertilizer_amount': (action[2*total_cells:3*total_cells] + 1) / 2
-    }
 
 
 def average_infos(infos):
@@ -73,31 +64,27 @@ def average_infos(infos):
 def random_train(farm_env, years, episodes):
     pbar = tqdm(total=episodes, desc="Training", unit="step")
     mean_rewards = []
-    water_reserve = []
-    fertilizer_reserve = []
-    state, _ = farm_env.reset()
+    farm_env.reset()
     infos = []
     for episode in range(episodes):
         if shutdown_flag.is_set():
             break
         
-        obs, _ = farm_env.reset()
-        state = flatten_observation(obs, years)
+        farm_env.reset()
         terminated = False
         truncated = False
         rewards = []
         
         while not (terminated or truncated):
             action = farm_env.action_space.sample()
-            # action, log_prob = agent.select_action_hybrid(state)
-            # next_state, reward, terminated, truncated, info = farm_env.step(agent_action_to_env(action=action, total_cells=total_cells))
-            next_state, reward, terminated, truncated, info = farm_env.step(action)
-            # agent.store_outcome(log_prob, reward, state)
-            state = flatten_observation(next_state, years)
+            _, reward, terminated, truncated, info = farm_env.step(action)
             rewards.append(reward)
         infos.append(info)
         pbar.update(1)
-        pbar.set_postfix(reward=np.mean(rewards))
+        pbar.set_postfix({
+            "reward":np.mean(rewards),
+            "harvest_reward": info['harvest_reward'],
+                          })
         mean_rewards.append(np.mean(rewards))
         
     pbar.close()
@@ -134,10 +121,10 @@ def sample_step_info(farm_env, years):
 
 def main():
     years = 10
-    farm_size = (6,6)
+    farm_size = (3, 3)
     weekly_water_supply = farm_size[0] * farm_size[1] * 0.75  # 0.5 water per cell per week
     weekly_fertilizer_supply = farm_size[0] * farm_size[1] * 0.5  # 0.5 fertilizer per cell per week
-    weekly_labour_supply = 1.5 * farm_size[0] * farm_size[1]  # 2 labour per cell per week
+    weekly_labour_supply = 2 * farm_size[0] * farm_size[1]  # 2 labour per cell per week
     farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=weekly_water_supply*52, yearly_fertilizer_supply=weekly_fertilizer_supply*52, weekly_labour_supply=weekly_labour_supply)
     
     sample_obs, _ = farm_env.reset()
