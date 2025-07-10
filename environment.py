@@ -7,7 +7,7 @@ import math
 (For better readability i suggest to turn on word wrap in your editor (Alt+z in VSCode))
 
 Problem Description:
-In this resource management game, the agent must allocate resources such as water, fertilizer, and labor to optimize crop growth while managing limited supplies in a farm. Each turn, the environmnet dynamically changes with fluctuating weather conditions, soil health variations, and shifting market prices, requiring the agent to adapt its strategy accordingly. Overwatering may lead to crop diseases, while under-fertilization slows growth and reduces tield, depending on the crops and the weather and soil conditions. At the end of each year, the farm production is sold and this represents the reward that the agent wants to maximize in the long-term (i.e. after a certain number of years in an episodic setting).
+In this resource management game, the agent must allocate resources such as water, fertilizer, and labour to optimize crop growth while managing limited supplies in a farm. Each turn, the environmnet dynamically changes with fluctuating weather conditions, soil health variations, and shifting market prices, requiring the agent to adapt its strategy accordingly. Overwatering may lead to crop diseases, while under-fertilization slows growth and reduces tield, depending on the crops and the weather and soil conditions. At the end of each year, the farm production is sold and this represents the reward that the agent wants to maximize in the long-term (i.e. after a certain number of years in an episodic setting).
 
 Implementation notes:
 - The farm is represented as an array of size farm_size[0] * farm_size[1], where each element represents a crop.
@@ -25,24 +25,27 @@ Implementation notes:
 - Each crop has a specific growth time and yield, which are defined in a dictionary.
 - The time passes in weeks, and each week the crops grow, and the agent can take actions.
 
-- Weather events: we introduce random weather events that alter the farm conditions:
-- Rain: Each tile receives a random amount of water (0.1 to 0.5)
-- Storm: Randomly damages crops, reducing their health by 0.1 to 0.3
-- Sunny: Default weather, no changes
-- Extreme Heat: Dries soil 30% faster
 
-- The first week is always Sunny (when the environment is reset), and the weather events are drawn randomly at the end of each week, affecting the farm conditions for the next week.
+- Weather events: we introduce random weather events that alter the farm conditions:
+    - Rain: Each tile receives a random amount of water (0.1 to 0.5)
+    - Storm: Randomly damages crops, reducing their health by 0.1 to 0.3
+    - Sunny: Default weather, no changes
+    - Extreme Heat: Dries 30% of the water in the soil
+
+    - The first week is always Sunny (when the environment is reset), and the weather events are drawn randomly at the end of each week, affecting the farm conditions for the next week.
 
 - Labour: The agent has a limited amount of labour supply each week, which is used to plant, water, and fertilize crops. If the labour supply is not enough, the agent cannot perform all actions.
-- The labour gets distributed to the actions in the following order: (1) planting, (2) watering, (3) fertilizing. If there is not enough labour supply, the agent cannot perform all actions.
-- Labour costs: planting a crop costs 1 labour, watering a crop costs 0.5 labour, fertilizing a crop costs 0.5 labour. ideally we won't allow the agent to have more than 2 * farm_size[0] * farm_size[1] labour supply, so that the agent can perform all actions in a week.
+    - The labour gets distributed to the actions in the following order: (1) planting, (2) watering, (3) fertilizing. If there is not enough labour supply, the agent cannot perform all actions.
+    - Labour costs: 
+        - planting a crop costs 1 labour
+        - watering a crop costs 0.5 labour
+        - fertilizing a crop costs 0.5 labour. 
+        - harvesting a crop costs 0.75 labour.
+    ideally we won't allow the agent to have more than 2.75 * farm_size[0] * farm_size[1] labour supply, so that the agent can perform all actions in a week.
+
+- Oscillating prices: the market prices for crops oscillate over time, with a period of 52 weeks (1 year). For simplicity's sake the prices of each type of crop will oscillate like a cosine function and each of these functions will have their phase shifted by a uniform amount. E.g. with 4 crops we will have a favorite crop per season. 
+
 """
-CROP_TYPES = {
-    0: {"name": "wheat", "growth_time": 28, "base_yield": 0.8, "water_need": 0.6, "fertilizer_need": 0.5, "price": 10},
-    1: {"name": "corn", "growth_time": 42, "base_yield": 0.9, "water_need": 0.7, "fertilizer_need": 0.6, "price": 15},
-    2: {"name": "tomato", "growth_time": 35, "base_yield": 0.7, "water_need": 0.8, "fertilizer_need": 0.7, "price": 20},
-    3: {"name": "potato", "growth_time": 30, "base_yield": 0.85, "water_need": 0.5, "fertilizer_need": 0.4, "price": 12},
-}
 
 WEATHER_EVENTS = {
     "sunny": {"probability": 35/52},
@@ -51,7 +54,22 @@ WEATHER_EVENTS = {
     "extreme_heat": {"water_drying_factor": 0.3, "probability": 5/52},
 }
 
+LABOR_COSTS ={
+    "planting": 1.0,
+    "watering": 0.5,
+    "fertilizing": 0.5,
+    "harvesting": 0.75,
+}
+
 WEATHER_DIST = [WEATHER_EVENTS[key]["probability"] for key in WEATHER_EVENTS.keys()]
+
+
+CROP_TYPES = {
+    0: {"name": "wheat", "growth_time": 28, "base_yield": 0.8, "water_need": 0.6, "fertilizer_need": 0.5, "price": 10},
+    1: {"name": "corn", "growth_time": 42, "base_yield": 0.9, "water_need": 0.7, "fertilizer_need": 0.6, "price": 15},
+    2: {"name": "tomato", "growth_time": 35, "base_yield": 0.7, "water_need": 0.8, "fertilizer_need": 0.7, "price": 20},
+    3: {"name": "potato", "growth_time": 30, "base_yield": 0.85, "water_need": 0.5, "fertilizer_need": 0.4, "price": 12},
+}
 
 class Farm(gym.Env):
     
@@ -62,27 +80,18 @@ class Farm(gym.Env):
         self.yearly_water_supply = yearly_water_supply
         self.yearly_fertilizer_supply = yearly_fertilizer_supply
         self.weekly_labour_supply = weekly_labour_supply
-        self.episode = None
-        
-        self.planting_cost = 1.0  # cost of planting a crop
-        self.watering_cost = 0.5  # cost of watering a crop
-        self.fertilizing_cost = 0.5  # cost of fertilizing a crop
-        
-        # penalties
-        self.dead_crop_penalty = 3
-        self.unwatered_crop_penalty = 1.5
-        
         self.total_cells = farm_size[0] * farm_size[1]
+        self.market_high = 1.5 # maximum market price multiplier
+        self.market_low = 0.5 # minimum market price multiplier
         self.action_space = gym.spaces.Dict(
             {
-                "crop_mask": gym.spaces.MultiBinary(self.total_cells),
-                "crop_selection": gym.spaces.Discrete(len(CROP_TYPES), start=-1),
-                # "harvest_mask": gym.spaces.MultiBinary(self.total_cells),
+                "crop_mask": gym.spaces.MultiDiscrete([len(CROP_TYPES) + 1] * self.total_cells),  # +1 for no crop selected
+                "harvest_mask": gym.spaces.MultiBinary(self.total_cells),
                 "water_amount": gym.spaces.Box(low=0., high=1., shape=(self.total_cells,), dtype=np.float32),
                 "fertilizer_amount": gym.spaces.Box(low=0., high=1., shape=(self.total_cells,), dtype=np.float32),
             }
-
         )
+        
         self.observation_space = gym.spaces.Dict(
             {
                 # [crop_id, growth_stage, health, yield, water, fertilizer]
@@ -95,6 +104,7 @@ class Farm(gym.Env):
                 "labour_supply": gym.spaces.Box(low=0., high=self.weekly_labour_supply, shape=(1,), dtype=np.float32),
                 "current_week": gym.spaces.Discrete(52),
                 "current_year": gym.spaces.Discrete(self.years),
+                "market_multipliers": gym.spaces.Box(low=self.market_low, high=self.market_high, shape=(len(CROP_TYPES),), dtype=np.float32),
             }
         )
         
@@ -105,6 +115,7 @@ class Farm(gym.Env):
         self.current_year = 0
         self.current_week = 0
         self.inventory = np.zeros(len(CROP_TYPES), dtype=np.int16)
+        
         self.info_memory = {
             "dead_crops": 0,
             "unwatered_crops": 0,
@@ -118,8 +129,20 @@ class Farm(gym.Env):
             "water_wasted": 0.0,
             "fertilizer_wasted": 0.0,
             "harvest_reward": 0.0,
+            "labour_used": 0.0,
+            "overwatered_crops": 0,
         }
         
+    def _get_market_multipliers(self) -> List[float]:
+        """
+        Calculate market multipliers for each crop type based on the current week.
+        It's simply a cosine function that oscillates between market_high and market_low with a phase shift for each crop type. The distance between each phase is uniformly distributed across the number of crop types.
+        """
+        return np.array([
+            ((self.market_high + self.market_low)/2) + 
+            ((self.market_high - self.market_low)/2) * np.cos((self.current_week / 52) * (2 * np.pi) + (crop_id * ((2*np.pi) / len(CROP_TYPES))))
+            for crop_id in range(len(CROP_TYPES))
+        ], dtype=np.float32)
     
     def _get_observation(self) -> Dict[str, Any]:
         return {
@@ -129,6 +152,7 @@ class Farm(gym.Env):
             "labour_supply": np.array([self.labour_supply], dtype=np.float32),
             "current_week": self.current_week,
             "current_year": self.current_year,
+            "market_multipliers": self._get_market_multipliers(),
             # "inventory": self.inventory
         }
         
@@ -140,14 +164,14 @@ class Farm(gym.Env):
     def reset(self, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
         super().reset(seed=seed)
         np.random.seed(seed)
-        self.episode = options.get("episode", None) if options else None
         self.farm = np.zeros(shape=(self.total_cells, 6), dtype=np.float32)  # [crop_id, growth_stage, health, yield, water, fertilizer]
-        self.farm[:, 0] = -1  # No crop planted
+        self.farm[:, 0] = 0  # No crop planted
         self.water_supply = self.yearly_water_supply
         self.fertilizer_supply = self.yearly_fertilizer_supply
         self.labour_supply = self.weekly_labour_supply
         self.current_year = 0
         self.current_week = 0
+        self.labour_supply = self.weekly_labour_supply
         self.inventory = np.zeros(len(CROP_TYPES), dtype=np.int16)
         self.info_memory = {
             "dead_crops": 0,
@@ -162,7 +186,8 @@ class Farm(gym.Env):
             "water_wasted": 0.0,
             "fertilizer_wasted": 0.0,
             "harvest_reward": 0.0,
-            "labour_used": 0.0
+            "labour_used": 0.0,
+            "overwatered_crops": 0,
 
         }
         return self._get_observation(), {}
@@ -172,8 +197,7 @@ class Farm(gym.Env):
     
     def step(self, action: Dict[str, Any]):
         crop_mask = action["crop_mask"]
-        crop_selection = action["crop_selection"]
-        # harvest_mask = action["harvest_mask"]
+        harvest_mask = action["harvest_mask"]
         water_amount = action["water_amount"]
         fertilizer_amount = action["fertilizer_amount"]
         reward = 0
@@ -184,89 +208,79 @@ class Farm(gym.Env):
         previous_fertilizer_supply = self.fertilizer_supply
         water_wasted = 0
         fertilizer_wasted = 0
-        
-        # REFACTORING: First plant all crops and remove labour
-        
-        # for i in range(self.total_cells):
-        #     if self.labour_supply >= self.planting_cost:
-        #         if crop_mask[i] == 1 and self.farm[i,0] == -1:
-        #             # do plant
-        #             self.farm[i, 0] = crop_selection
-        #             self.farm[i, 1] = 0.0 # growth stage
-        #             self.farm[i, 2] = 1.0 # health
-        #             self.farm[i, 3] = 0.0 # yield
-        #             self.labour_supply -= self.planting_cost
-        #             self.info_memory["planted_crops"] += 1
-        #     else: break # no labour left, skip planting
-                
 
-        # # 2) Watering
-        # for i in range(self.total_cells):
-        #     if self.labour_supply >= self.watering_cost:
-        #         if water_amount[i] > 0:
-        #             water_used = min(water_amount[i], self.water_supply)
-        #             self.farm[i, 4] += water_used
-        #             self.water_supply -= water_used
-        #             self.labour_supply -= self.watering_cost
-        #             if self.farm[i,0] == -1:
-        #                 # if the cell is empty, water is wasted
-        #                 water_wasted += water_used
-        #     else: break # no labour left, skip watering
-
-        # # 3) Fertilizing
-        # for i in range(self.total_cells):
-        #     if self.labour_supply >= self.fertilizing_cost:
-        #         if fertilizer_amount[i] > 0:
-        #             fert_used = min(fertilizer_amount[i], self.fertilizer_supply)
-        #             self.farm[i, 5] += fert_used
-        #             self.fertilizer_supply -= fert_used
-        #             self.labour_supply -= self.fertilizing_cost
-        #             if self.farm[i,0] == -1:
-        #                 fertilizer_wasted += fert_used
-        #     else: break # no labour left, skip fertilizing
-            
-        # OLD VERSION
-        # Apply actions to the farm
-        for i in range(self.total_cells):
-            if crop_mask[i] == 1 and self.farm[i, 0] == -1:
-                # Plant a new crop
-                self.farm[i, 0] = crop_selection
-                self.farm[i, 1] = 0.0 # growth stage
-                self.farm[i, 2] = 1.0 # health
-                self.farm[i, 3] = 0.0 # yield
-                
-                self.info_memory["planted_crops"] = self.info_memory.get("planted_crops", 0) + 1
-                
-        for i in range(self.total_cells):
-            # add water and fertilizer
-            if water_amount[i] > 0:
-                water_used = min(water_amount[i], self.water_supply)
-                self.farm[i, 4] += water_used
-                self.water_supply -= water_used
-                if self.farm[i, 0] == -1:
-                    # if the cell is empty, water is wasted
-                    water_wasted += water_used
+        ### Apply actions to the farm ###
+        # Plant crops
+        plant_mask = (crop_mask > 0) & (self.farm[:, 0] == 0)  # Only plant in empty cells and where crop_mask is greater than 0
+        max_ops = int(self.labour_supply // LABOR_COSTS["planting"]) # maximum number of operations we can perform given current labour supply
+        plant_indices = np.nonzero(plant_mask)[0]  # Get indices of cells where we can plant crops
+        to_plant = plant_indices[:max_ops]  # Limit to the maximum number of operations we can perform
         
-        for i in range(self.total_cells):
-            if fertilizer_amount[i] > 0:
-                fertilizer_used = min(fertilizer_amount[i], self.fertilizer_supply)
-                self.farm[i, 5] += fertilizer_used
-                self.fertilizer_supply -= fertilizer_used
-                
-                if self.farm[i, 0] == -1:
-                    # if the cell is empty, fertilizer is wasted
-                    fertilizer_wasted += fertilizer_used
-                
-            # clip the water and fertilizer to 1
-            self.farm[i, 4] = np.clip(self.farm[i, 4], 0, 1)
-            self.farm[i, 5] = np.clip(self.farm[i, 5], 0, 1)
+        self.farm[to_plant, 0] = crop_mask[to_plant]             # crop_id
+        self.farm[to_plant, 1] = 0.0                             # growth_stage
+        self.farm[to_plant, 2] = 1.0                             # health
+        self.farm[to_plant, 3] = 0.0                             # yield
 
-        self.info_memory["labour_used"] = self.weekly_labour_supply - self.labour_supply
+        num_planted = to_plant.shape[0]
+        self.info_memory["planted_crops"] = self.info_memory.get("planted_crops", 0) + num_planted        
         
+        # Watering crops
+        want_water_mask = water_amount > 0               
+        candidate_idxs  = np.nonzero(want_water_mask)[0]  
+
+        max_ops = int(self.labour_supply // LABOR_COSTS["watering"]) 
+        to_water = candidate_idxs[:max_ops] # at most max_ops cells
+
+        req = water_amount[to_water] # gather requested amounts shape (total_cells,)
+
+        #  compute actual water_used sequentially via vectorized cumsum trick 
+        #  for each j: water_used[j] = min(req[j], remaining_supply_before_j)
+        cumsum_req = np.cumsum(req) # [r0, r0+r1, …] shape is still (totla_cells,)
+        remaining_before = self.water_supply - (cumsum_req - req) # we remove req as this is the amount before watering when watering cell j 
+        water_used = np.minimum(req, np.clip(remaining_before, 0, None))  # cumsum trick
+
+        self.farm[to_water, 4] += water_used
+        self.farm[:, 4] = np.clip(self.farm[:, 4], 0, 2)
+
+        self.water_supply -=  water_used.sum()
+
+        empty_mask = (self.farm[to_water, 0] == 0) # empty watered cells
+        water_wasted += water_used[empty_mask].sum()
+
+        num_watered = to_water.shape[0]
+        self.labour_supply -= num_watered * LABOR_COSTS["watering"]
+
+        # Fertilizing crops                    
+        want_fertilizer_mask = fertilizer_amount > 0               
+        candidate_idxs  = np.nonzero(want_fertilizer_mask)[0]  
+
+        max_ops = int(self.labour_supply // LABOR_COSTS["fertilizing"]) 
+        to_fertilize = candidate_idxs[:max_ops] # at most max_ops cells
+
+        req = fertilizer_amount[to_fertilize] # gather requested amounts shape (total_cells,)
+
+        #  compute actual fertilizer_used sequentially via vectorized cumsum trick 
+        #  for each j: fertilizer_used[j] = min(req[j], remaining_supply_before_j)
+        cumsum_req = np.cumsum(req) # [r0, r0+r1, …] shape is still (totla_cells,)
+        remaining_before = self.fertilizer_supply - (cumsum_req - req) # we remove req as this is the amount before fertilizing when fertilizing cell j 
+        fertilizer_used = np.minimum(req, np.clip(remaining_before, 0, None))  # cumsum trick
+
+        self.farm[to_fertilize, 5] += fertilizer_used
+        self.farm[:, 5] = np.clip(self.farm[:, 5], 0, 1)
+
+        self.fertilizer_supply -=  fertilizer_used.sum()
+
+        empty_mask = (self.farm[to_fertilize, 0] == 0) # empty fertilized cells
+        fertilizer_wasted += fertilizer_used[empty_mask].sum()
+
+        num_fertilized = to_fertilize.shape[0]
+        self.labour_supply -= num_fertilized * LABOR_COSTS["fertilizing"]            
+        
+
         # Health and growth stage update
         for i in range(self.total_cells):
-            if self.farm[i, 0] != -1:
-                crop_id = int(self.farm[i, 0])
+            if self.farm[i, 0] != 0:
+                crop_id = int(self.farm[i, 0]) - 1
                 growth_time = CROP_TYPES[crop_id]["growth_time"]
                 water_need = CROP_TYPES[crop_id]["water_need"]
                 fertilizer_need = CROP_TYPES[crop_id]["fertilizer_need"]
@@ -274,11 +288,22 @@ class Farm(gym.Env):
                 growth_step = 1 / growth_time
                 # print(f"Growth step: {growth_step}")
                 
-                if self.farm[i, 4] >= 1.5 * water_need: # TODO: handle overwatering
-                    # Overwatering: health reduced, growth and yield stale
-                    self.farm[i, 2] -= 0.5 # too much?
+                if self.farm[i, 4] >= 1.8 * water_need: # TODO: handle overwatering
+                    # Overwatering: growth and yield stale, health reduced
+                    self.farm[i, 2] -= 0.2 # a hard hit
+                    if self.farm[i, 2] <= 0: 
+                        # dead crop, automatically removed
+                        self.farm[i, 0] = 0 
+                        self.farm[i, 1] = 0.0
+                        self.farm[i, 2] = 0.0
+                        self.farm[i, 3] = 0.0
+                        
+                        # reward -= self.dead_crop_penalty
+                        
+                        self.info_memory["dead_crops"] = self.info_memory.get("dead_crops", 0) + 1
+                        self.info_memory["overwatered_crops"] = self.info_memory.get("overwatered_crops", 0) + 1
                     
-                elif self.farm[i, 4] >= water_need:
+                elif self.farm[i, 4] >= water_need: # TODO: handle overwatering
                     # Compatible with life
                     # growth, health, yield
                     growth_mutliplier = 1.5 if self.farm[i, 5] >= fertilizer_need else 1.0 # speed up growth if enough fertilizer is used
@@ -291,19 +316,19 @@ class Farm(gym.Env):
                     self.farm[i, 2] -= 0.2
                     self.farm[i, 3] -= base_yield * growth_step * .5
                     self.farm[i, 3] = max(self.farm[i, 3], 0.0)
-                    reward -= self.unwatered_crop_penalty
+                    # reward -= self.unwatered_crop_penalty
                     
                     self.info_memory["unwatered_crops"] = self.info_memory.get("unwatered_crops", 0) + 1
-                if self.farm[i, 2] <= 0: 
-                    # dead crop, automatically removed
-                    self.farm[i, 0] = -1 
-                    self.farm[i, 1] = 0.0
-                    self.farm[i, 2] = 0.0
-                    self.farm[i, 3] = 0.0
-                    
-                    reward -= self.dead_crop_penalty
-                    
-                    self.info_memory["dead_crops"] = self.info_memory.get("dead_crops", 0) + 1
+                    if self.farm[i, 2] <= 0: 
+                        # dead crop, automatically removed
+                        self.farm[i, 0] = 0 
+                        self.farm[i, 1] = 0.0
+                        self.farm[i, 2] = 0.0
+                        self.farm[i, 3] = 0.0
+                        
+                        # reward -= self.dead_crop_penalty
+                        
+                        self.info_memory["dead_crops"] = self.info_memory.get("dead_crops", 0) + 1
         
         curr_water_supply = self.water_supply
         curr_fertilizer_supply = self.fertilizer_supply
@@ -318,36 +343,36 @@ class Farm(gym.Env):
         self.info_memory["growth_stage"] += np.mean(self.farm[:, 1]) # average growth stage
         self.info_memory["health"] += np.mean(self.farm[:, 2]) # average health
         self.info_memory["yield"] += np.sum(self.farm[:, 3]) # average yield
-        
+        self.info_memory["labour_used"] += (self.weekly_labour_supply - self.labour_supply) # total labour used
         
         # step bonus rewards
         # growth_reward = np.mean(self.farm[:, 1]) * 1.3 # reward for growing crops
         # health_reward = np.mean(self.farm[:, 2]) * 1.4 # reward for healthy crops
-        yield_reward = np.sum(self.farm[:, 3]) * 1.2 # reward for yield, we really want to encourage the agent to grow crops that yield more
+        # yield_reward = np.sum(self.farm[:, 3]) * 1.2 # reward for yield, we really want to encourage the agent to grow crops that yield more
         
-        # good management rewards
-        planted_cells = np.sum(self.farm[:, 0] >= 0)
-        planting_reward = planted_cells / self.total_cells * 1.4
+        # # good management rewards
+        # planted_cells = np.sum(self.farm[:, 0] >= 0)
+        # planting_reward = planted_cells / self.total_cells * 1.4
         
-        # step bonus for resource efficiency
-        water_efficiency = (water_used) * 1
-        fertilizer_efficiency = (fertilizer_used) * 1
+        # # step bonus for resource efficiency
+        # water_efficiency = (water_used) * 1
+        # fertilizer_efficiency = (fertilizer_used) * 1
         
-        # penalize water waste
-        water_wasted_penalty = (water_wasted) * 1
-        fertilizer_wasted_penalty = (fertilizer_wasted) * 1
+        # # penalize water waste
+        # water_wasted_penalty = (water_wasted) * 1
+        # fertilizer_wasted_penalty = (fertilizer_wasted) * 1
 
-        # STEP-WISE REWARD
-        reward += yield_reward
-        reward += water_efficiency + fertilizer_efficiency
-        reward -= (water_wasted_penalty + fertilizer_wasted_penalty)
-        reward += planting_reward
+        # REWARD COMPUTATION
+        # reward += yield_reward
+        # reward += water_efficiency + fertilizer_efficiency
+        # reward -= (water_wasted_penalty + fertilizer_wasted_penalty)
+        # reward += planting_reward
         
         # end of week: the soil dries and the crops consume the fertilizer
         for i in range(self.total_cells):
             # get crop water and fertilizer needs
-            if self.farm[i, 0] != -1:
-                crop_id = int(self.farm[i, 0])
+            if self.farm[i, 0] != 0:
+                crop_id = int(self.farm[i, 0]) - 1  # 0 is no crop, so we add 1 to match the CROP_TYPES index
                 water_need = CROP_TYPES[crop_id]["water_need"]
                 fertilizer_need = CROP_TYPES[crop_id]["fertilizer_need"]
                 
@@ -360,65 +385,72 @@ class Farm(gym.Env):
                 self.farm[i, 5] = max(self.farm[i, 5] - 0.4, 0.0)
                 
         
-        self.current_week += 1
-        self.labour_supply = self.weekly_labour_supply  # reset labour supply for the next week
-        
-        if (self.current_week % 52) == 0:
-            self.current_week = 0
-            self.current_year += 1
-            
-            # Harvest crops
-            for i in range(self.total_cells):
-                if self.farm[i, 0] != -1:
-                    harvest_reward = (self.farm[i, 3] * CROP_TYPES[int(self.farm[i, 0])]["price"]) * 3
+        # Harvest crops
+        mm = self._get_market_multipliers()
+        for i in range(self.total_cells):
+            if self.labour_supply >= LABOR_COSTS["harvesting"]:
+                if harvest_mask[i] == 1 and self.farm[i, 0] != 0:
+                    crop_id = int(self.farm[i, 0]) - 1  # 0 is no crop, so we subtract 1 to match the CROP_TYPES index
+                    harvest_reward = (self.farm[i, 3] * CROP_TYPES[crop_id]["price"]) * mm[crop_id]  # yield * price * market multiplier
                     reward += harvest_reward
 
                     # remove the crop from the farm
-                    self.farm[i, 0] = -1
+                    self.farm[i, 0] = 0
                     self.farm[i, 1] = 0.0
                     self.farm[i, 2] = 0.0
                     self.farm[i, 3] = 0.0
+                    
+                    self.labour_supply -= LABOR_COSTS["harvesting"]
+                    
                     self.info_memory["harvested_crops"] += 1
                     self.info_memory["harvest_reward"] += harvest_reward
+            else: break
+                
+        self.current_week += 1
+        self.current_week %= 52
+        if (self.current_week % 52) == 0:
             # replenish water and fertilizer supplies... what if we don't replenish yearly but let the agent manage the supplies?
+            self.current_year += 1
+            
             self.water_supply = self.yearly_water_supply
             self.fertilizer_supply = self.yearly_fertilizer_supply
-            self.labour_supply = self.weekly_labour_supply
             
             # check if the episode is finished
             if self.current_year >= self.years:
                 terminated = True
+        self.labour_supply = self.weekly_labour_supply
+
 
         # next week weather event
-        # weather_event = np.random.choice(list(WEATHER_EVENTS.keys()), p=WEATHER_DIST)
-        # if weather_event == "rain":
-        #     # Each tile receives a random amount of water (0.1 to 0.5)
-        #     rain_amount = np.random.uniform(*WEATHER_EVENTS["rain"]["water_amount"], size=self.total_cells)
-        #     self.farm[:, 4] += rain_amount
-        #     self.farm[:, 4] = np.clip(self.farm[:, 4], 0, 2)
-        # elif weather_event == "storm":
-        #     # Randomly damages crops, reducing their health by 0.1 to 0.3
-        #     storm_damage = np.random.uniform(*WEATHER_EVENTS["storm"]["health_reduction"], size=self.total_cells)
-        #     self.farm[:, 2] -= storm_damage
-        #     self.farm[:, 2] = np.clip(self.farm[:, 2], 0, 1)
-        #     # If health is 0, the crop is dead
-        #     for i in range(self.total_cells):
-        #         if self.farm[i, 2] <= 0:
-        #             # dead crop, automatically removed
-        #             self.farm[i, 0] = -1 
-        #             self.farm[i, 1] = 0.0
-        #             self.farm[i, 2] = 0.0
-        #             self.farm[i, 3] = 0.0
+        weather_event = np.random.choice(list(WEATHER_EVENTS.keys()), p=WEATHER_DIST)
+        if weather_event == "rain":
+            # Each tile receives a random amount of water (0.1 to 0.5)
+            rain_amount = np.random.uniform(*WEATHER_EVENTS["rain"]["water_amount"], size=self.total_cells)
+            self.farm[:, 4] += rain_amount
+            self.farm[:, 4] = np.clip(self.farm[:, 4], 0, 2)
+        elif weather_event == "storm":
+            # Randomly damages crops, reducing their health by 0.1 to 0.3
+            storm_damage = np.random.uniform(*WEATHER_EVENTS["storm"]["health_reduction"], size=self.total_cells)
+            self.farm[:, 2] -= storm_damage
+            self.farm[:, 2] = np.clip(self.farm[:, 2], 0, 1)
+            # If health is 0, the crop is dead
+            for i in range(self.total_cells):
+                if self.farm[i, 2] <= 0:
+                    # dead crop, automatically removed
+                    self.farm[i, 0] = 0 
+                    self.farm[i, 1] = 0.0
+                    self.farm[i, 2] = 0.0
+                    self.farm[i, 3] = 0.0
                     
-        #             reward -= self.dead_crop_penalty * .5 # should i penalize this?
+                    # reward -= self.dead_crop_penalty * .5 # should i penalize this?
                     
-        #             self.info_memory["dead_crops"] += 1
-        # elif weather_event == "extreme_heat":
-        #     # Dries soil 30% faster
-        #     for i in range(self.total_cells):
-        #         self.farm[i, 4] = max(self.farm[i, 4] - (0.3 * self.farm[i, 4]), 0.0)
-        #         # reduce fertilizer by 0.1
-        #         self.farm[i, 5] = max(self.farm[i, 5] - 0.1, 0.0)
+                    self.info_memory["dead_crops"] += 1
+        elif weather_event == "extreme_heat":
+            # Dries soil 30% faster
+            for i in range(self.total_cells):
+                self.farm[i, 4] = max(self.farm[i, 4] - (0.3 * self.farm[i, 4]), 0.0)
+                # reduce fertilizer by 0.1
+                self.farm[i, 5] = max(self.farm[i, 5] - 0.1, 0.0)
         # else: sunny weather, no changes 
 
         # update observation
@@ -429,6 +461,7 @@ class Farm(gym.Env):
         observation["labour_supply"] = np.array([self.labour_supply], dtype=np.float32)
         observation["current_week"] = self.current_week
         observation["current_year"] = self.current_year
+        observation["market_multipliers"] = mm
         
         return observation, reward, terminated, truncated, self.info_memory      
 
