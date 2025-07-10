@@ -134,6 +134,7 @@ class HybridPolicyNetwork(nn.Module):
         
         # Discrete heads
         self.crop_mask_head = nn.Linear(256, total_cells  * (self.n_crops + 1))  # 4 crop types + 1 for no crop selected, we multiply to one-hot encode the crop mask
+        self.harvest_mask_head = nn.Linear(256, total_cells)  # binary harvest mask, 1 if harvest, 0 if not
         # self.crop_select_head = nn.Linear(256, 4)  # 4 crop types
 
 
@@ -148,9 +149,10 @@ class HybridPolicyNetwork(nn.Module):
         
         # Discrete outputs
         crop_mask_logits = self.crop_mask_head(x) # take the logits
+        harvest_mask_logits = self.harvest_mask_head(x)  # binary logits for harvest mask
         # crop_select_logits = self.crop_select_head(x) # also take the logits
         
-        return water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits
+        return water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits, harvest_mask_logits
 
 class PolicyGradientAgent:
     def __init__(self,
@@ -177,7 +179,7 @@ class PolicyGradientAgent:
 
     def select_action_hybrid(self, state):
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits = self.policy(state)
+        water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits, harvest_mask_logits = self.policy(state)
         
         # Sample continuous actions from Gaussian policy
         water_dist = torch.distributions.Normal(water_mean, water_std)
@@ -194,19 +196,23 @@ class PolicyGradientAgent:
         crop_mask_action = crop_mask_dist.sample()
         crop_mask_log_prob = crop_mask_dist.log_prob(crop_mask_action).sum(dim=-1)  # Compute log probability
         
+        harvest_mask_dist = torch.distributions.Bernoulli(logits=harvest_mask_logits)
+        harvest_mask_action = harvest_mask_dist.sample()
+        harvest_mask_log_prob = harvest_mask_dist.log_prob(harvest_mask_action).sum(dim=-1)  # Compute log probability
 
         # Combine actions and log probabilities
         action = {
             'water_amount': torch.clamp(water_action, 0, 1).detach().cpu().numpy().squeeze(),
             'fertilizer_amount': torch.clamp(fertilizer_action, 0, 1).detach().cpu().numpy().squeeze(),
             'crop_mask': crop_mask_action.squeeze(0).detach().cpu().numpy(),
+            'harvest_mask': harvest_mask_action.squeeze(0).detach().cpu().numpy(),
         }
-        log_prob = water_log_prob + fertilizer_log_prob + crop_mask_log_prob 
+        log_prob = water_log_prob + fertilizer_log_prob + crop_mask_log_prob + harvest_mask_log_prob
         entropy = (
             water_dist.entropy().mean()
             + fertilizer_dist.entropy().mean()
             + crop_mask_dist.entropy().mean()
-        ) / 3
+        ) / 4
         return action, log_prob, entropy
         
     def beta_cycle(self, T=150, beta_min=0.01, beta_max=0.2):

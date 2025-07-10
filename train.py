@@ -124,7 +124,7 @@ def main():
     farm_size = (3, 3)
     weekly_water_supply = farm_size[0] * farm_size[1] * 0.75  # 0.5 water per cell per week
     weekly_fertilizer_supply = farm_size[0] * farm_size[1] * 0.5  # 0.5 fertilizer per cell per week
-    weekly_labour_supply = 2 * farm_size[0] * farm_size[1]  # 2 labour per cell per week
+    weekly_labour_supply = 1.75 * farm_size[0] * farm_size[1]  # labour per cell per week
     farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=weekly_water_supply*52, yearly_fertilizer_supply=weekly_fertilizer_supply*52, weekly_labour_supply=weekly_labour_supply)
     
     sample_obs, _ = farm_env.reset()

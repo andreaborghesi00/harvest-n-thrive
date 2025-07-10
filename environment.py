@@ -14,13 +14,34 @@ Implementation notes:
     - The growth_stage is a float between 0 and 1, where 0 means the crop is just planted and 1 means the crop is fully grown.
     - The health is a float between 0 and 1, where 0 means the crop is dead and 1 means the crop is healthy.
     - The yield is a float between 0 and 1, where 0 means no yield and 1 means maximum yield.
-    - The water is a float between 0 and 1, where 0 means no water and 1 means maximum water.
+    - The water is a float between 0 and 2, where 0 means no water, 1 is about right, 2 means maximum water (overflows elsewhere).
     - The fertilizer is a float between 0 and 1, where 0 means no fertilizer and 1 means maximum fertilizer.
 - The agent can water a crop, fertilize a crop, or harvest a crop, or do nothing
+- If the agent waters a crop too much (1.5x the water need), the crop health is reduced by 0.5, and the growth and yield are stale. (overwatering)
 - The agent can also choose to plant a new crop in an empty field.
 - The harvested crops are stored in a separate array, and at the end of each year the stored crops are sold, rewarding the agent.
 - Each crop has a specific growth time and yield, which are defined in a dictionary.
 - The time passes in weeks, and each week the crops grow, and the agent can take actions.
+
+
+- Weather events: we introduce random weather events that alter the farm conditions:
+    - Rain: Each tile receives a random amount of water (0.1 to 0.5)
+    - Storm: Randomly damages crops, reducing their health by 0.1 to 0.3
+    - Sunny: Default weather, no changes
+    - Extreme Heat: Dries 30% of the water in the soil
+
+    - The first week is always Sunny (when the environment is reset), and the weather events are drawn randomly at the end of each week, affecting the farm conditions for the next week.
+
+- Labour: The agent has a limited amount of labour supply each week, which is used to plant, water, and fertilize crops. If the labour supply is not enough, the agent cannot perform all actions.
+    - The labour gets distributed to the actions in the following order: (1) planting, (2) watering, (3) fertilizing. If there is not enough labour supply, the agent cannot perform all actions.
+    - Labour costs: 
+        - planting a crop costs 1 labour
+        - watering a crop costs 0.5 labour
+        - fertilizing a crop costs 0.5 labour. 
+        - harvesting a crop costs 0.75 labour.
+    ideally we won't allow the agent to have more than 2.75 * farm_size[0] * farm_size[1] labour supply, so that the agent can perform all actions in a week.
+
+
 """
 
 WEATHER_EVENTS = {
@@ -34,17 +55,20 @@ LABOR_COSTS ={
     "planting": 1.0,
     "watering": 0.5,
     "fertilizing": 0.5,
+    "harvesting": 0.75,
 }
 
 WEATHER_DIST = [WEATHER_EVENTS[key]["probability"] for key in WEATHER_EVENTS.keys()]
 
+
+CROP_TYPES = {
+    0: {"name": "wheat", "growth_time": 28, "base_yield": 0.8, "water_need": 0.6, "fertilizer_need": 0.5, "price": 10},
+    1: {"name": "corn", "growth_time": 42, "base_yield": 0.9, "water_need": 0.7, "fertilizer_need": 0.6, "price": 15},
+    2: {"name": "tomato", "growth_time": 35, "base_yield": 0.7, "water_need": 0.8, "fertilizer_need": 0.7, "price": 20},
+    3: {"name": "potato", "growth_time": 30, "base_yield": 0.85, "water_need": 0.5, "fertilizer_need": 0.4, "price": 12},
+}
+
 class Farm(gym.Env):
-    CROP_TYPES = {
-        0: {"name": "wheat", "growth_time": 28, "base_yield": 0.8, "water_need": 0.6, "fertilizer_need": 0.5, "price": 10},
-        1: {"name": "corn", "growth_time": 42, "base_yield": 0.9, "water_need": 0.7, "fertilizer_need": 0.6, "price": 15},
-        2: {"name": "tomato", "growth_time": 35, "base_yield": 0.7, "water_need": 0.8, "fertilizer_need": 0.7, "price": 20},
-        3: {"name": "potato", "growth_time": 30, "base_yield": 0.85, "water_need": 0.5, "fertilizer_need": 0.4, "price": 12},
-    }
     
     def __init__(self, farm_size=(10, 10), years=10, yearly_water_supply=1000, yearly_fertilizer_supply=500, weekly_labour_supply=100):
         super().__init__()
@@ -63,10 +87,8 @@ class Farm(gym.Env):
         print(self.total_cells)
         self.action_space = gym.spaces.Dict(
             {
-                # "crop_mask": gym.spaces.MultiBinary(self.total_cells),
-                # "crop_selection": gym.spaces.Discrete(len(self.CROP_TYPES), start=-1),
-                "crop_mask": gym.spaces.MultiDiscrete([len(self.CROP_TYPES) + 1] * self.total_cells),  # +1 for no crop selected
-                # "harvest_mask": gym.spaces.MultiBinary(self.total_cells),
+                "crop_mask": gym.spaces.MultiDiscrete([len(CROP_TYPES) + 1] * self.total_cells),  # +1 for no crop selected
+                "harvest_mask": gym.spaces.MultiBinary(self.total_cells),
                 "water_amount": gym.spaces.Box(low=0., high=1., shape=(self.total_cells,), dtype=np.float32),
                 "fertilizer_amount": gym.spaces.Box(low=0., high=1., shape=(self.total_cells,), dtype=np.float32),
             }
@@ -76,7 +98,7 @@ class Farm(gym.Env):
             {
                 # [crop_id, growth_stage, health, yield, water, fertilizer]
                 "farm_state": gym.spaces.Box(low=np.array([-1, 0., 0., 0., 0., 0.] * self.total_cells, dtype=np.float32).reshape(self.total_cells, 6),
-                                             high=np.array([len(self.CROP_TYPES), 1., 1., 1., 1., 1.] * self.total_cells, dtype=np.float32).reshape(self.total_cells, 6),
+                                             high=np.array([len(CROP_TYPES), 1., 1., 1., 1., 1.] * self.total_cells, dtype=np.float32).reshape(self.total_cells, 6),
                                              shape=(self.total_cells, 6),
                                              dtype=np.float32),
                 "water_supply": gym.spaces.Box(low=0., high=self.yearly_water_supply, shape=(1,), dtype=np.float32),
@@ -84,10 +106,6 @@ class Farm(gym.Env):
                 "labour_supply": gym.spaces.Box(low=0., high=self.weekly_labour_supply, shape=(1,), dtype=np.float32),
                 "current_week": gym.spaces.Discrete(52),
                 "current_year": gym.spaces.Discrete(self.years),
-                # "inventory": gym.spaces.Box(low=np.zeros(len(self.CROP_TYPES)),
-                #                             high=np.ones(len(self.CROP_TYPES)) * 1000,
-                #                             shape=(len(self.CROP_TYPES),),
-                #                             dtype=np.int16)
             }
         )
         
@@ -97,7 +115,7 @@ class Farm(gym.Env):
         self.labour_supply = self.weekly_labour_supply
         self.current_year = 0
         self.current_week = 0
-        self.inventory = np.zeros(len(self.CROP_TYPES), dtype=np.int16)
+        self.inventory = np.zeros(len(CROP_TYPES), dtype=np.int16)
         self.info_memory = {
             "dead_crops": 0,
             "unwatered_crops": 0,
@@ -144,7 +162,7 @@ class Farm(gym.Env):
         self.current_year = 0
         self.current_week = 0
         self.labour_supply = self.weekly_labour_supply
-        self.inventory = np.zeros(len(self.CROP_TYPES), dtype=np.int16)
+        self.inventory = np.zeros(len(CROP_TYPES), dtype=np.int16)
         self.info_memory = {
             "dead_crops": 0,
             "unwatered_crops": 0,
@@ -169,7 +187,7 @@ class Farm(gym.Env):
     
     def step(self, action: Dict[str, Any]):
         crop_mask = action["crop_mask"]
-        # harvest_mask = action["harvest_mask"]
+        harvest_mask = action["harvest_mask"]
         water_amount = action["water_amount"]
         fertilizer_amount = action["fertilizer_amount"]
         reward = 0
@@ -253,10 +271,10 @@ class Farm(gym.Env):
         for i in range(self.total_cells):
             if self.farm[i, 0] != 0:
                 crop_id = int(self.farm[i, 0]) - 1
-                growth_time = self.CROP_TYPES[crop_id]["growth_time"]
-                water_need = self.CROP_TYPES[crop_id]["water_need"]
-                fertilizer_need = self.CROP_TYPES[crop_id]["fertilizer_need"]
-                base_yield = self.CROP_TYPES[crop_id]["base_yield"]
+                growth_time = CROP_TYPES[crop_id]["growth_time"]
+                water_need = CROP_TYPES[crop_id]["water_need"]
+                fertilizer_need = CROP_TYPES[crop_id]["fertilizer_need"]
+                base_yield = CROP_TYPES[crop_id]["base_yield"]
                 growth_step = 1 / growth_time
                 # print(f"Growth step: {growth_step}")
                 
@@ -345,8 +363,8 @@ class Farm(gym.Env):
             # get crop water and fertilizer needs
             if self.farm[i, 0] != 0:
                 crop_id = int(self.farm[i, 0]) - 1  # 0 is no crop, so we add 1 to match the CROP_TYPES index
-                water_need = self.CROP_TYPES[crop_id]["water_need"]
-                fertilizer_need = self.CROP_TYPES[crop_id]["fertilizer_need"]
+                water_need = CROP_TYPES[crop_id]["water_need"]
+                fertilizer_need = CROP_TYPES[crop_id]["fertilizer_need"]
                 
                 # reduce water and fertilizer by the needs of the crop
                 self.farm[i, 4] = max(self.farm[i, 4] - water_need, 0.0)
@@ -357,16 +375,12 @@ class Farm(gym.Env):
                 self.farm[i, 5] = max(self.farm[i, 5] - 0.4, 0.0)
                 
         
-        self.current_week += 1
-        if (self.current_week % 52) == 0:
-            self.current_week = 0
-            self.current_year += 1
-            
-            # Harvest crops
-            for i in range(self.total_cells):
-                if self.farm[i, 0] != 0:
+        # Harvest crops
+        for i in range(self.total_cells):
+            if self.labour_supply >= LABOR_COSTS["harvesting"]:
+                if harvest_mask[i] == 1 and self.farm[i, 0] != 0:
                     crop_id = int(self.farm[i, 0]) - 1  # 0 is no crop, so we subtract 1 to match the CROP_TYPES index
-                    harvest_reward = (self.farm[i, 3] * self.CROP_TYPES[crop_id]["price"]) * 3
+                    harvest_reward = (self.farm[i, 3] * CROP_TYPES[crop_id]["price"]) * 3
                     reward += harvest_reward
 
                     # remove the crop from the farm
@@ -374,10 +388,19 @@ class Farm(gym.Env):
                     self.farm[i, 1] = 0.0
                     self.farm[i, 2] = 0.0
                     self.farm[i, 3] = 0.0
+                    
+                    self.labour_supply -= LABOR_COSTS["harvesting"]
+                    
                     self.info_memory["harvested_crops"] += 1
                     self.info_memory["harvest_reward"] += harvest_reward
-                    
+            else: break
+                
+        self.current_week += 1
+        if (self.current_week % 52) == 0:
             # replenish water and fertilizer supplies... what if we don't replenish yearly but let the agent manage the supplies?
+            self.current_week = 0
+            self.current_year += 1
+            
             self.water_supply = self.yearly_water_supply
             self.fertilizer_supply = self.yearly_fertilizer_supply
             
