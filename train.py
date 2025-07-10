@@ -12,18 +12,18 @@ from pathlib import Path
 
 LEARNING_RATE = 3e-4
 GAMMA = 0.99  # Discount factor
-EPISODES = 10000  # Number of training episodes
+EPISODES = 2000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EXPERIMENT_NAME = "testing"
+EXPERIMENT_NAME = "icm_eta_130"
 
-EPS_GREEDY = True  # Use epsilon-greedy exploration
+EPS_GREEDY = False  # Use epsilon-greedy exploration
 ICM = True  # Use Intrinsic Curiosity Module
-ENTROPY_BONUS = True
+ENTROPY_BONUS = False
 
 # For ICM
-ETA = 4.0  # Weighting between internal curiosity and external reward
+ETA = 130.0  # Weighting between internal curiosity and external reward
 
 RESULTS_DIR = Path("results/")
 INFO_DIR = RESULTS_DIR / "infos"
@@ -61,7 +61,7 @@ def flatten_action(action):
     return np.concatenate([
         action['crop_mask'].flatten(),
         # [action['crop_selection']],
-        # action['harvest_mask'].flatten(),
+        action['harvest_mask'].flatten(),
         action['water_amount'].flatten(),
         action['fertilizer_amount'].flatten()
     ])
@@ -103,11 +103,12 @@ def random_train(farm_env, years, episodes):
     pbar.close()
     print(mean_rewards)
     print(average_infos(infos))
-    np.save(f'random_{EXPERIMENT_NAME}.npy', mean_rewards)
+    np.save(RESULTS_DIR / f'random_{EXPERIMENT_NAME}.npy', mean_rewards)
+    np.save(INFO_DIR / f'random_{EXPERIMENT_NAME}_infos.npy', infos)
     
 def main():
     years = 10
-    farm_size = (3, 3)
+    farm_size = (10, 10)
     weekly_water_supply = farm_size[0] * farm_size[1] * 0.75  # 0.5 water per cell per week
     weekly_fertilizer_supply = farm_size[0] * farm_size[1] * 0.5  # 0.5 fertilizer per cell per week
     weekly_labour_supply = 1.75 * farm_size[0] * farm_size[1]  # labour per cell per week
@@ -175,7 +176,7 @@ def main():
             r_exts.append(reward)
             if agent.icm is not None:
                 r_int = agent.icm.compute_intrinsic_reward(state, next_state, flatten_action(action))
-                r_ints.append(r_int)
+                r_ints.append(ETA * r_int)
                 reward += ETA * r_int
                 agent.icm.update(state=state, next_state=next_state, action=flatten_action(action))
             

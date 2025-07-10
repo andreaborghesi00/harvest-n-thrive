@@ -18,12 +18,11 @@ Implementation notes:
     - The yield is a float between 0 and 1, where 0 means no yield and 1 means maximum yield.
     - The water is a float between 0 and 2, where 0 means no water, 1 is about right, 2 means maximum water (overflows elsewhere).
     - The fertilizer is a float between 0 and 1, where 0 means no fertilizer and 1 means maximum fertilizer.
-- The agent can water a crop, fertilize a crop, or harvest a crop, or do nothing
-- If the agent waters a crop too much (1.5x the water need), the crop health is reduced by 0.5, and the growth and yield are stale. (overwatering)
-- The agent can also choose to plant a new crop in an empty field.
-- The harvested crops are stored in a separate array, and at the end of each year the stored crops are sold, rewarding the agent.
+- The agent can plant a new crop (empty tiles only), water a crop, fertilize a crop, or harvest a crop (full tiles only), or do nothing
+- If the agent waters a crop too much (1.5x the water need), the crop health is reduced by 0.2, and the growth and yield are stale. (overwatering)
+- The harvested crops are sold immediatly at the market, rewarding the agent proportionally to the quality of the crop and the current market price.
 - Each crop has a specific growth time and yield, which are defined in a dictionary.
-- The time passes in weeks, and each week the crops grow, and the agent can take actions.
+- A time step is a week of the year, and each week the crops grow, and the agent can take actions.
 
 
 - Weather events: we introduce random weather events that alter the farm conditions:
@@ -33,6 +32,7 @@ Implementation notes:
     - Extreme Heat: Dries 30% of the water in the soil
 
     - The first week is always Sunny (when the environment is reset), and the weather events are drawn randomly at the end of each week, affecting the farm conditions for the next week.
+
 
 - Labour: The agent has a limited amount of labour supply each week, which is used to plant, water, and fertilize crops. If the labour supply is not enough, the agent cannot perform all actions.
     - The labour gets distributed to the actions in the following order: (1) planting, (2) watering, (3) fertilizing. If there is not enough labour supply, the agent cannot perform all actions.
