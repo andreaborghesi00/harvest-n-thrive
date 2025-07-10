@@ -15,7 +15,7 @@ EPISODES = 10000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EXPERIMENT_NAME = "icm"
+EXPERIMENT_NAME = "testing"
 # For ICM
 ETA = 4.0  # Weighting between internal curiosity and external reward
 
@@ -39,7 +39,7 @@ def flatten_observation(obs, years):
         obs['farm_state'].flatten(),
         obs['water_supply'],
         obs['fertilizer_supply'],
-        obs['labor_supply'],
+        obs['labour_supply'],
         [obs['current_week'] / 52],
         [obs['current_year'] / years]
     ])
@@ -137,7 +137,8 @@ def main():
     farm_size = (6,6)
     weekly_water_supply = farm_size[0] * farm_size[1] * 0.75  # 0.5 water per cell per week
     weekly_fertilizer_supply = farm_size[0] * farm_size[1] * 0.5  # 0.5 fertilizer per cell per week
-    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=weekly_water_supply*52, yearly_fertilizer_supply=weekly_fertilizer_supply*52, yearly_labor_supply=1000)
+    weekly_labour_supply = 1.5 * farm_size[0] * farm_size[1]  # 2 labour per cell per week
+    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=weekly_water_supply*52, yearly_fertilizer_supply=weekly_fertilizer_supply*52, weekly_labour_supply=weekly_labour_supply)
     
     sample_obs, _ = farm_env.reset()
     sample_action = farm_env.action_space.sample()
@@ -152,7 +153,13 @@ def main():
  
     random_train(farm_env, years, 50)
 
-    agent = PolicyGradientAgent(state_dim=state_dim, action_dim=action_dim, total_cells=total_cells, learning_rate=LEARNING_RATE, gamma=GAMMA, device=DEVICE)
+    agent = PolicyGradientAgent(state_dim=state_dim,
+                                action_dim=action_dim, 
+                                total_cells=total_cells, 
+                                learning_rate=LEARNING_RATE, 
+                                gamma=GAMMA, 
+                                device=DEVICE, 
+                                use_icm=False)
     
     eps_start   = 1.0      # start fully random
     eps_end     = 0.1      # end with some randomness
@@ -193,13 +200,14 @@ def main():
             next_state, reward, terminated, truncated, info = farm_env.step(action)
             next_state = flatten_observation(next_state, years)
             
-            r_int = agent.icm.compute_intrinsic_reward(state, next_state, flatten_action(action))
-            r_ints.append(r_int)
             r_exts.append(reward)
-            reward += ETA * r_int
-            agent.store_outcome(log_prob, reward, state, entropy)
+            if agent.icm is not None:
+                r_int = agent.icm.compute_intrinsic_reward(state, next_state, flatten_action(action))
+                r_ints.append(r_int)
+                reward += ETA * r_int
+                agent.icm.update(state=state, next_state=next_state, action=flatten_action(action))
             
-            agent.icm.update(state=state, next_state=next_state, action=flatten_action(action))
+            agent.store_outcome(log_prob, reward, state, entropy)            
             state = next_state
             
             rewards.append(reward)
@@ -207,8 +215,9 @@ def main():
         pbar.update(1)
         pbar.set_postfix({
             "tot_reward": np.mean(rewards),
-            "int": np.mean(r_ints),
+            "int": np.mean(r_ints) if len(r_ints) > 0 else 0.0,
             "ext": np.mean(r_exts),
+            "havest": info['harvest_reward'],
         })
         mean_rewards.append(np.mean(rewards))
         infos.append(info)

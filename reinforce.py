@@ -152,16 +152,25 @@ class HybridPolicyNetwork(nn.Module):
         return water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits, crop_select_logits
 
 class PolicyGradientAgent:
-    def __init__(self, action_dim, state_dim, total_cells, learning_rate: float = 3e-4, gamma: float = .99, episodes: int = 1000, batch_size: int = 10, device=torch.device("cuda") if torch.cuda.is_available() else "cpu"):
+    def __init__(self,
+                 action_dim, 
+                 state_dim, 
+                 total_cells, 
+                 learning_rate: float = 3e-4, 
+                 gamma: float = .99, 
+                 episodes: int = 1000,
+                 use_icm: bool = True, 
+                 device=torch.device("cuda") if torch.cuda.is_available() else "cpu"):
         self.device = device
-        self.policy = HybridPolicyNetwork(state_dim, total_cells).to(self.device)
+        self.policy = HybridPolicyNetwork(state_dim, 
+        total_cells).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=20)
         # self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=episodes/batch_size, eta_min=1e-5)
         self.memory = []  # Stores (log_prob, reward, state)
         self.gamma = gamma
         self.episode = 0
-        self.icm = ICM(state_dim=state_dim, action_dim=action_dim, device=self.device).to(self.device)
+        self.icm = ICM(state_dim=state_dim, action_dim=action_dim, device=self.device).to(self.device) if use_icm else None
 
     def select_action_hybrid(self, state):
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
