@@ -15,15 +15,20 @@ GAMMA = 0.99  # Discount factor
 EPISODES = 2000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EXPERIMENT_NAME = "icm_eta_130"
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+EXPERIMENT_NAME = "eps_greedy_decay_999"
 
-EPS_GREEDY = False  # Use epsilon-greedy exploration
-ICM = True  # Use Intrinsic Curiosity Module
+EPS_GREEDY = True  # Use epsilon-greedy exploration
+ICM = False  # Use Intrinsic Curiosity Module
 ENTROPY_BONUS = False
 
 # For ICM
 ETA = 130.0  # Weighting between internal curiosity and external reward
+
+# Epsilon-greedy
+EPS_START   = 1.0 # start fully random
+EPS_END     = 0.1 # end with some randomness
+EPS_DECAY   = 0.999 # decay per episode
 
 RESULTS_DIR = Path("results/")
 INFO_DIR = RESULTS_DIR / "infos"
@@ -103,7 +108,7 @@ def random_train(farm_env, years, episodes):
     pbar.close()
     print(mean_rewards)
     print(average_infos(infos))
-    np.save(RESULTS_DIR / f'random_{EXPERIMENT_NAME}.npy', mean_rewards)
+    np.save(REWARDS_DIR / f'random_{EXPERIMENT_NAME}.npy', mean_rewards)
     np.save(INFO_DIR / f'random_{EXPERIMENT_NAME}_infos.npy', infos)
     
 def main():
@@ -136,12 +141,8 @@ def main():
                                 use_icm=ICM,
                                 entropy_bonus = ENTROPY_BONUS,
                                 )
-    
-    eps_start   = 1.0      # start fully random
-    eps_end     = 0.1      # end with some randomness
-    eps_decay   = 0.995    # decay per episode
 
-    epsilon = eps_start
+    epsilon = EPS_START
     
     pbar = tqdm(total=EPISODES, desc="Training", unit="step")
     mean_rewards = []
@@ -167,7 +168,6 @@ def main():
                 log_prob = torch.tensor([0.0], device=agent.device)
                 entropy  = torch.tensor(0.0, device=agent.device)
             else:
-                # exploitation
                 action, log_prob, entropy = agent.select_action_hybrid(state)
                 
             next_state, reward, terminated, truncated, info = farm_env.step(action)
@@ -195,7 +195,7 @@ def main():
         mean_rewards.append(np.mean(rewards))
         infos.append(info)
         # Decay epsilon
-        epsilon = max(epsilon * eps_decay, eps_end)
+        epsilon = max(epsilon * EPS_DECAY, EPS_END)
         
         # update policy every BATCH_SIZE episodes
         if (episode + 1) % BATCH_SIZE == 0:
@@ -207,7 +207,7 @@ def main():
     
     pbar.close()
     print(mean_rewards)
-    np.save(RESULTS_DIR / f'reinforce_{EXPERIMENT_NAME}_rewards.npy', mean_rewards)
+    np.save(REWARDS_DIR / f'reinforce_{EXPERIMENT_NAME}_rewards.npy', mean_rewards)
     
 if __name__ == "__main__":
     main()
