@@ -8,6 +8,7 @@ import random
 import torch
 import signal
 import threading
+from pathlib import Path
 
 LEARNING_RATE = 3e-4
 GAMMA = 0.99  # Discount factor
@@ -18,6 +19,13 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EXPERIMENT_NAME = "testing"
 # For ICM
 ETA = 4.0  # Weighting between internal curiosity and external reward
+
+RESULTS_DIR = Path("results/")
+INFO_DIR = RESULTS_DIR / "infos"
+REWARDS_DIR = RESULTS_DIR / "rewards"
+
+INFO_DIR.mkdir(parents=True, exist_ok=True)
+REWARDS_DIR.mkdir(parents=True, exist_ok=True)
 
 shutdown_flag = threading.Event()
 
@@ -92,33 +100,6 @@ def random_train(farm_env, years, episodes):
     print(average_infos(infos))
     np.save(f'random_{EXPERIMENT_NAME}.npy', mean_rewards)
     
-def sample_step_info(farm_env, years):
-    sample_obs, _ = farm_env.reset()
-    sample_action = farm_env.action_space.sample()
-    observation, reward, terminated, truncated, info = farm_env.step(sample_action)
-    state_dim = flatten_observation(sample_obs, years).shape[0] # total_cells * 6 + 5
-
-    print("Predicted Observation Space Shape:", (state_dim,))
-    print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
-    
-    print("Initial Observation:", sample_obs['farm_state'])
-    
-    print("Sample Action Shape:", flatten_action(sample_action).shape)
-    print("Sample Action:", sample_action)
-    
-    print("Step Result:")
-    print("Crops:", observation['farm_state'][:, 0])
-    print("Growth:", observation['farm_state'][:, 1])
-    print("Health:", observation['farm_state'][:, 2])
-    print("Yield:", observation['farm_state'][:, 3])
-    print("Water:", observation['farm_state'][:, 4])
-    print("Fertilizer:", observation['farm_state'][:, 5])
-    
-    print("Reward:", reward)
-    print("Terminated:", terminated)
-    print("Truncated:", truncated)
-    print("Info:", info)    
-
 def main():
     years = 10
     farm_size = (3, 3)
@@ -217,11 +198,11 @@ def main():
             print(average_infos(infos[-BATCH_SIZE:]))
             
     # save infos and rewards array
-    np.save(f'reinforce_{EXPERIMENT_NAME}_infos.npy', infos)
+    np.save(INFO_DIR / f'reinforce_{EXPERIMENT_NAME}_infos.npy', infos)
     
     pbar.close()
     print(mean_rewards)
-    np.save(f'reinforce_{EXPERIMENT_NAME}_rewards.npy', mean_rewards)
+    np.save(RESULTS_DIR / f'reinforce_{EXPERIMENT_NAME}_rewards.npy', mean_rewards)
     
 if __name__ == "__main__":
     main()
