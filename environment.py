@@ -181,64 +181,74 @@ class Farm(gym.Env):
         water_wasted = 0
         fertilizer_wasted = 0
 
-        # Apply actions to the farm
+        ### Apply actions to the farm ###
         # Plant crops
-        for i in range(self.total_cells):
-            if self.labour_supply >= LABOR_COSTS["planting"]:
-                if crop_mask[i] > 0 and self.farm[i, 0] == 0:
-                    # Plant a new crop
-                    self.farm[i, 0] = crop_mask[i]
-                    self.farm[i, 1] = 0.0 # growth stage
-                    self.farm[i, 2] = 1.0 # health
-                    self.farm[i, 3] = 0.0 # yield
-                    
-                    self.labour_supply -= LABOR_COSTS["planting"]
-                    self.info_memory["planted_crops"] = self.info_memory.get("planted_crops", 0) + 1
-            else: continue
-        plant_costs = self.weekly_labour_supply - self.labour_supply
-        prev_labour = self.labour_supply
-        # print(f"Planting costs: {plant_costs}")
-        # Water crops
-        for i in range(self.total_cells):
-            if self.labour_supply >= LABOR_COSTS["watering"]:
-                if water_amount[i] > 0:
-                    water_used = min(water_amount[i], self.water_supply)
-                    self.farm[i, 4] += water_used
-                    self.water_supply -= water_used
-                    if self.farm[i, 0] == 0:
-                        # if the cell is empty, water is wasted
-                        water_wasted += water_used
-                    
-                    # clip water to 2
-                    self.farm[i, 4] = np.clip(self.farm[i, 4], 0, 2)
-                    
-                    self.labour_supply -= LABOR_COSTS["watering"]
-            else: continue
-        watering_costs = prev_labour - self.labour_supply
-        # print(f"Watering costs: {watering_costs}")
-                    
-        prev_labour = self.labour_supply
-        # Fertilize crops
-        for i in range(self.total_cells):     
-            if self.labour_supply >= LABOR_COSTS["fertilizing"]:   
-                if fertilizer_amount[i] > 0:
-                    fertilizer_used = min(fertilizer_amount[i], self.fertilizer_supply)
-                    self.farm[i, 5] += fertilizer_used
-                    self.fertilizer_supply -= fertilizer_used
-                    
-                    if self.farm[i, 0] == 0:
-                        # if the cell is empty, fertilizer is wasted
-                        fertilizer_wasted += fertilizer_used
-                    
-                    # clip fertilizer to 2
-                    self.farm[i, 5] = np.clip(self.farm[i, 5], 0, 2)
-                    
-                    self.labour_supply -= LABOR_COSTS["fertilizing"]
-            else: continue
+        plant_mask = (crop_mask > 0) & (self.farm[:, 0] == 0)  # Only plant in empty cells and where crop_mask is greater than 0
+        max_ops = int(self.labour_supply // LABOR_COSTS["planting"]) # maximum number of operations we can perform given current labour supply
+        plant_indices = np.nonzero(plant_mask)[0]  # Get indices of cells where we can plant crops
+        to_plant = plant_indices[:max_ops]  # Limit to the maximum number of operations we can perform
+        
+        self.farm[to_plant, 0] = crop_mask[to_plant]             # crop_id
+        self.farm[to_plant, 1] = 0.0                             # growth_stage
+        self.farm[to_plant, 2] = 1.0                             # health
+        self.farm[to_plant, 3] = 0.0                             # yield
 
-        fertilizing_costs = prev_labour - self.labour_supply
-        # print(f"Fertilizing costs: {fertilizing_costs}")
-    
+        num_planted = to_plant.shape[0]
+        self.info_memory["planted_crops"] = self.info_memory.get("planted_crops", 0) + num_planted        
+        
+        # Watering crops
+        want_water_mask = water_amount > 0               
+        candidate_idxs  = np.nonzero(want_water_mask)[0]  
+
+        max_ops = int(self.labour_supply // LABOR_COSTS["watering"]) 
+        to_water = candidate_idxs[:max_ops] # at most max_ops cells
+
+        req = water_amount[to_water] # gather requested amounts shape (total_cells,)
+
+        #  compute actual water_used sequentially via vectorized cumsum trick 
+        #  for each j: water_used[j] = min(req[j], remaining_supply_before_j)
+        cumsum_req = np.cumsum(req) # [r0, r0+r1, …] shape is still (totla_cells,)
+        remaining_before = self.water_supply - (cumsum_req - req) # we remove req as this is the amount before watering when watering cell j 
+        water_used = np.minimum(req, np.clip(remaining_before, 0, None))  # cumsum trick
+
+        self.farm[to_water, 4] += water_used
+        self.farm[:, 4] = np.clip(self.farm[:, 4], 0, 2)
+
+        self.water_supply -=  water_used.sum()
+
+        empty_mask = (self.farm[to_water, 0] == 0) # empty watered cells
+        water_wasted += water_used[empty_mask].sum()
+
+        num_watered = to_water.shape[0]
+        self.labour_supply -= num_watered * LABOR_COSTS["watering"]
+
+        # Fertilizing crops                    
+        want_fertilizer_mask = fertilizer_amount > 0               
+        candidate_idxs  = np.nonzero(want_fertilizer_mask)[0]  
+
+        max_ops = int(self.labour_supply // LABOR_COSTS["fertilizing"]) 
+        to_fertilize = candidate_idxs[:max_ops] # at most max_ops cells
+
+        req = fertilizer_amount[to_fertilize] # gather requested amounts shape (total_cells,)
+
+        #  compute actual fertilizer_used sequentially via vectorized cumsum trick 
+        #  for each j: fertilizer_used[j] = min(req[j], remaining_supply_before_j)
+        cumsum_req = np.cumsum(req) # [r0, r0+r1, …] shape is still (totla_cells,)
+        remaining_before = self.fertilizer_supply - (cumsum_req - req) # we remove req as this is the amount before fertilizing when fertilizing cell j 
+        fertilizer_used = np.minimum(req, np.clip(remaining_before, 0, None))  # cumsum trick
+
+        self.farm[to_fertilize, 5] += fertilizer_used
+        self.farm[:, 5] = np.clip(self.farm[:, 5], 0, 1)
+
+        self.fertilizer_supply -=  fertilizer_used.sum()
+
+        empty_mask = (self.farm[to_fertilize, 0] == 0) # empty fertilized cells
+        fertilizer_wasted += fertilizer_used[empty_mask].sum()
+
+        num_fertilized = to_fertilize.shape[0]
+        self.labour_supply -= num_fertilized * LABOR_COSTS["fertilizing"]            
+        
+
         # Health and growth stage update
         for i in range(self.total_cells):
             if self.farm[i, 0] != 0:
