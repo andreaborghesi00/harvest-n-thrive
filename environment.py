@@ -41,6 +41,7 @@ Implementation notes:
         - harvesting a crop costs 0.75 labour.
     ideally we won't allow the agent to have more than 2.75 * farm_size[0] * farm_size[1] labour supply, so that the agent can perform all actions in a week.
 
+- Oscillating prices: the market prices for crops oscillate over time, with a period of 52 weeks (1 year). For simplicity's sake the prices of each type of crop will oscillate like a cosine function and each of these functions will have their phase shifted by a uniform amount. E.g. with 4 crops we will have a favorite crop per season. 
 
 """
 
@@ -77,14 +78,9 @@ class Farm(gym.Env):
         self.yearly_water_supply = yearly_water_supply
         self.yearly_fertilizer_supply = yearly_fertilizer_supply
         self.weekly_labour_supply = weekly_labour_supply
-        self.episode = None
-        
-        # penalties
-        self.dead_crop_penalty = 3
-        self.unwatered_crop_penalty = 1.5
-        
         self.total_cells = farm_size[0] * farm_size[1]
-        print(self.total_cells)
+        self.market_high = 1.5 # maximum market price multiplier
+        self.market_low = 0.5 # minimum market price multiplier
         self.action_space = gym.spaces.Dict(
             {
                 "crop_mask": gym.spaces.MultiDiscrete([len(CROP_TYPES) + 1] * self.total_cells),  # +1 for no crop selected
@@ -92,8 +88,8 @@ class Farm(gym.Env):
                 "water_amount": gym.spaces.Box(low=0., high=1., shape=(self.total_cells,), dtype=np.float32),
                 "fertilizer_amount": gym.spaces.Box(low=0., high=1., shape=(self.total_cells,), dtype=np.float32),
             }
-
         )
+        
         self.observation_space = gym.spaces.Dict(
             {
                 # [crop_id, growth_stage, health, yield, water, fertilizer]
@@ -106,6 +102,7 @@ class Farm(gym.Env):
                 "labour_supply": gym.spaces.Box(low=0., high=self.weekly_labour_supply, shape=(1,), dtype=np.float32),
                 "current_week": gym.spaces.Discrete(52),
                 "current_year": gym.spaces.Discrete(self.years),
+                "market_multipliers": gym.spaces.Box(low=self.market_low, high=self.market_high, shape=(len(CROP_TYPES),), dtype=np.float32),
             }
         )
         
@@ -116,6 +113,7 @@ class Farm(gym.Env):
         self.current_year = 0
         self.current_week = 0
         self.inventory = np.zeros(len(CROP_TYPES), dtype=np.int16)
+        
         self.info_memory = {
             "dead_crops": 0,
             "unwatered_crops": 0,
@@ -133,6 +131,16 @@ class Farm(gym.Env):
             "overwatered_crops": 0,
         }
         
+    def _get_market_multipliers(self) -> List[float]:
+        """
+        Calculate market multipliers for each crop type based on the current week.
+        It's simply a cosine function that oscillates between market_high and market_low with a phase shift for each crop type. The distance between each phase is uniformly distributed across the number of crop types.
+        """
+        return np.array([
+            ((self.market_high + self.market_low)/2) + 
+            ((self.market_high - self.market_low)/2) * np.cos((self.current_week / 52) * (2 * np.pi) + (crop_id * ((2*np.pi) / len(CROP_TYPES))))
+            for crop_id in range(len(CROP_TYPES))
+        ], dtype=np.float32)
     
     def _get_observation(self) -> Dict[str, Any]:
         return {
@@ -142,6 +150,7 @@ class Farm(gym.Env):
             "labour_supply": np.array([self.labour_supply], dtype=np.float32),
             "current_week": self.current_week,
             "current_year": self.current_year,
+            "market_multipliers": self._get_market_multipliers(),
             # "inventory": self.inventory
         }
         
@@ -153,7 +162,6 @@ class Farm(gym.Env):
     def reset(self, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
         super().reset(seed=seed)
         np.random.seed(seed)
-        self.episode = options.get("episode", None) if options else None
         self.farm = np.zeros(shape=(self.total_cells, 6), dtype=np.float32)  # [crop_id, growth_stage, health, yield, water, fertilizer]
         self.farm[:, 0] = 0  # No crop planted
         self.water_supply = self.yearly_water_supply
@@ -376,11 +384,12 @@ class Farm(gym.Env):
                 
         
         # Harvest crops
+        mm = self._get_market_multipliers()
         for i in range(self.total_cells):
             if self.labour_supply >= LABOR_COSTS["harvesting"]:
                 if harvest_mask[i] == 1 and self.farm[i, 0] != 0:
                     crop_id = int(self.farm[i, 0]) - 1  # 0 is no crop, so we subtract 1 to match the CROP_TYPES index
-                    harvest_reward = (self.farm[i, 3] * CROP_TYPES[crop_id]["price"]) * 3
+                    harvest_reward = (self.farm[i, 3] * CROP_TYPES[crop_id]["price"]) * mm[crop_id]  # yield * price * market multiplier
                     reward += harvest_reward
 
                     # remove the crop from the farm
@@ -396,9 +405,9 @@ class Farm(gym.Env):
             else: break
                 
         self.current_week += 1
+        self.current_week %= 52
         if (self.current_week % 52) == 0:
             # replenish water and fertilizer supplies... what if we don't replenish yearly but let the agent manage the supplies?
-            self.current_week = 0
             self.current_year += 1
             
             self.water_supply = self.yearly_water_supply
@@ -450,6 +459,7 @@ class Farm(gym.Env):
         observation["labour_supply"] = np.array([self.labour_supply], dtype=np.float32)
         observation["current_week"] = self.current_week
         observation["current_year"] = self.current_year
+        observation["market_multipliers"] = mm
         
         return observation, reward, terminated, truncated, self.info_memory      
 

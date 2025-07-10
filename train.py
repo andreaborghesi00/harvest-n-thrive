@@ -131,8 +131,8 @@ def main():
     sample_action = farm_env.action_space.sample()
     
     total_cells = farm_size[0] * farm_size[1]
-    state_dim = flatten_observation(sample_obs, years).shape[0] # total_cells * 6 + 5
-    action_dim = flatten_action(sample_action).shape[0] # total_cells * 2 + 1 + 1
+    state_dim = flatten_observation(sample_obs, years).shape[0] 
+    action_dim = flatten_action(sample_action).shape[0] 
     
     print("Predicted Observation Space Shape:", (state_dim,))
     print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
@@ -171,7 +171,6 @@ def main():
         r_ints = []
         r_exts = [] 
         while not (terminated or truncated):
-            # action = farm_env.action_space.sample()
             
             # if random.random() < epsilon:
             if False:
@@ -183,7 +182,6 @@ def main():
                 # exploitation
                 action, log_prob, entropy = agent.select_action_hybrid(state)
                 
-            # next_state, reward, terminated, truncated, info = farm_env.step(agent_action_to_env(action=action, total_cells=total_cells))
             next_state, reward, terminated, truncated, info = farm_env.step(action)
             next_state = flatten_observation(next_state, years)
             
@@ -216,23 +214,13 @@ def main():
             agent.update_policy()
             print(average_infos(infos[-BATCH_SIZE:]))
             
-    # save infos
+    # save infos and rewards array
     np.save(f'reinforce_{EXPERIMENT_NAME}_infos.npy', infos)
     
     pbar.close()
     print(mean_rewards)
     np.save(f'reinforce_{EXPERIMENT_NAME}_rewards.npy', mean_rewards)
     
-    plt.figure(figsize=(12, 6))
-    plt.plot(mean_rewards)
-    plt.xlabel('Episodes')
-    plt.ylabel('Mean Reward')
-    plt.title('REINFORCE mean rewards')
-    plt.grid()
-    plt.ylim(-15, 10)
-    plt.savefig('reinforce_mean_rewards.png')
-    
-    # print(fertilizer_reserve)
 if __name__ == "__main__":
     main()
 
