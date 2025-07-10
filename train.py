@@ -17,6 +17,11 @@ BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EXPERIMENT_NAME = "testing"
+
+EPS_GREEDY = True  # Use epsilon-greedy exploration
+ICM = True  # Use Intrinsic Curiosity Module
+ENTROPY_BONUS = True
+
 # For ICM
 ETA = 4.0  # Weighting between internal curiosity and external reward
 
@@ -127,7 +132,9 @@ def main():
                                 learning_rate=LEARNING_RATE, 
                                 gamma=GAMMA, 
                                 device=DEVICE, 
-                                use_icm=False)
+                                use_icm=ICM,
+                                entropy_bonus = ENTROPY_BONUS,
+                                )
     
     eps_start   = 1.0      # start fully random
     eps_end     = 0.1      # end with some randomness
@@ -154,10 +161,7 @@ def main():
         r_ints = []
         r_exts = [] 
         while not (terminated or truncated):
-            
-            # if random.random() < epsilon:
-            if False:
-                # exploration
+            if EPS_GREEDY and random.random() < epsilon:
                 action = farm_env.action_space.sample()
                 log_prob = torch.tensor([0.0], device=agent.device)
                 entropy  = torch.tensor(0.0, device=agent.device)

@@ -164,7 +164,8 @@ class PolicyGradientAgent:
                  learning_rate: float = 3e-4, 
                  gamma: float = .99, 
                  episodes: int = 1000,
-                 use_icm: bool = True, 
+                 use_icm: bool = True,
+                 entropy_bonus: bool = False,
                  device=torch.device("cuda") if torch.cuda.is_available() else "cpu"):
         self.device = device
         self.total_cells = total_cells
@@ -176,6 +177,7 @@ class PolicyGradientAgent:
         self.memory = []  # Stores (log_prob, reward, state)
         self.gamma = gamma
         self.episode = 0
+        self.entropy_bonus = entropy_bonus
         self.icm = ICM(state_dim=state_dim, action_dim=action_dim, device=self.device).to(self.device) if use_icm else None
 
     def select_action_hybrid(self, state):
@@ -242,12 +244,16 @@ class PolicyGradientAgent:
 
         baseline = sum(returns) / len(returns)
 
-        for (log_prob, _, _, entropy), R in zip(self.memory, returns):
-            advantage = R - baseline  
-
-            # exploration_bonus = self.beta_cycle(T=BETA_T, beta_max=BETA_MAX, beta_min=BETA_MIN) * entropy
-            # policy_loss.append(-log_prob * advantage - exploration_bonus)  # Gradient ascent
-            policy_loss.append(-log_prob * advantage) # no exploration bonus for now
+        if self.entropy_bonus:
+            for (log_prob, _, _, entropy), R in zip(self.memory, returns):
+                advantage = R - baseline  
+                exploration_bonus = self.beta_cycle(T=BETA_T, beta_max=BETA_MAX, beta_min=BETA_MIN) * entropy
+                policy_loss.append(-log_prob * advantage - exploration_bonus)  # Gradient ascent
+        
+        else: 
+            for (log_prob, _, _, entropy), R in zip(self.memory, returns):
+                advantage = R - baseline  
+                policy_loss.append(-log_prob * advantage) # no exploration bonus for now
 
         self.optimizer.zero_grad()
         policy_loss = torch.cat(policy_loss).sum()
@@ -257,10 +263,6 @@ class PolicyGradientAgent:
         
         episode_reward = sum(reward for _, reward, _, _ in self.memory)
         self.scheduler.step(episode_reward)
-        
-        # Exploration coefficient decay
-        # EXPLORATION_COEFFICIENT *= EXPLORATION_COEFFICIENT_DECAY
-        # EXPLORATION_COEFFICIENT = max(EXPLORATION_COEFFICIENT, 0.01)
-        
+
         # Clear memory after updating policy
         self.memory = []
