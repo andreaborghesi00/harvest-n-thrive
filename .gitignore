@@ -1,3 +1,6 @@
+# for nohup
+*.out
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -195,10 +198,10 @@ cython_debug/
 
 # Notebooks
 .ipynb_checkpoints/
-*.ipynb
+scraps.ipynb
 
 # Numpy
-*.npy
+# *.npy
 
 # plots and figures
 *.png
