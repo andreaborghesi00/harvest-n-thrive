@@ -127,16 +127,33 @@ class HybridPolicyNetwork(nn.Module):
         )
         
         # Continuous heads
-        self.water_head = nn.Linear(256, total_cells)
-        self.fertilizer_head = nn.Linear(256, total_cells)
+        # self.water_head = nn.Linear(256, total_cells)
+        self.water_head = nn.Sequential(
+            nn.Linear(256, total_cells)
+        )
+        self.fertilizer_head = nn.Sequential(
+            nn.Linear(256, total_cells)
+        )
         
         self.water_log_std = nn.Parameter(torch.zeros(total_cells))
         self.fertilizer_log_std = nn.Parameter(torch.zeros(total_cells))
         
         # Discrete heads
-        self.crop_mask_head = nn.Linear(256, total_cells  * (self.n_crops + 1))  # 4 crop types + 1 for no crop selected, we multiply to one-hot encode the crop mask
-        self.harvest_mask_head = nn.Linear(256, total_cells)  # binary harvest mask, 1 if harvest, 0 if not
-        # self.crop_select_head = nn.Linear(256, 4)  # 4 crop types
+        # self.crop_mask_head = nn.Sequential(
+        #     nn.Linear(256, total_cells  * (self.n_crops + 1)) 
+        #     ) # 4 crop types + 1 for no crop selected, we multiply to one-hot encode the crop mask
+        
+        self.crop_mask_head = nn.Sequential(
+            nn.Linear(256, total_cells)
+        )        
+        
+        self.crop_type_head = nn.Sequential(
+            nn.Linear(256, self.n_crops)
+        )
+        
+        self.harvest_mask_head = nn.Sequential(
+            nn.Linear(256, total_cells)
+            )  # binary harvest mask, 1 if harvest, 0 if not
 
 
     def forward(self, x):
@@ -149,11 +166,12 @@ class HybridPolicyNetwork(nn.Module):
         fertilizer_std = torch.exp(self.fertilizer_log_std)
         
         # Discrete outputs
+        # crop_mask_logits = self.crop_mask_head(x) # take the logits
         crop_mask_logits = self.crop_mask_head(x) # take the logits
         harvest_mask_logits = self.harvest_mask_head(x)  # binary logits for harvest mask
-        # crop_select_logits = self.crop_select_head(x) # also take the logits
+        crop_select_logits = self.crop_type_head(x) # also take the logits
         
-        return water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits, harvest_mask_logits
+        return water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits, harvest_mask_logits, crop_select_logits
 
 class PolicyGradientAgent:
     def __init__(self,
@@ -172,7 +190,7 @@ class PolicyGradientAgent:
         self.n_crops = n_crops
         self.policy = HybridPolicyNetwork(state_dim, self.total_cells, self.n_crops).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=20)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=40)
         # self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=episodes/batch_size, eta_min=1e-5)
         self.memory = []  # Stores (log_prob, reward, state)
         self.gamma = gamma
@@ -182,7 +200,7 @@ class PolicyGradientAgent:
 
     def select_action_hybrid(self, state):
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits, harvest_mask_logits = self.policy(state)
+        water_mean, water_std, fertilizer_mean, fertilizer_std, crop_mask_logits, harvest_mask_logits, crop_select_logits = self.policy(state)
         
         # Sample continuous actions from Gaussian policy
         water_dist = torch.distributions.Normal(water_mean, water_std)
@@ -194,10 +212,18 @@ class PolicyGradientAgent:
         fertilizer_log_prob = fertilizer_dist.log_prob(fertilizer_action).sum(dim=-1)  # Compute log probability
         
         # Sample discrete actions
-        crop_mask_logits = crop_mask_logits.view(-1, self.total_cells, self.n_crops + 1)  # Reshape to (1, total_cells * num_classes)
-        crop_mask_dist = torch.distributions.Categorical(logits=crop_mask_logits)
+        # crop_mask_logits = crop_mask_logits.view(-1, self.total_cells, self.n_crops + 1)  # Reshape to (1, total_cells * num_classes)
+        # crop_mask_dist = torch.distributions.Categorical(logits=crop_mask_logits)
+        # crop_mask_action = crop_mask_dist.sample()
+        # crop_mask_log_prob = crop_mask_dist.log_prob(crop_mask_action).sum(dim=-1)  # Compute log probability
+        
+        crop_mask_dist = torch.distributions.Bernoulli(logits=crop_mask_logits)
         crop_mask_action = crop_mask_dist.sample()
         crop_mask_log_prob = crop_mask_dist.log_prob(crop_mask_action).sum(dim=-1)  # Compute log probability
+        
+        crop_select_dist = torch.distributions.Categorical(logits=crop_select_logits)
+        crop_select_action = crop_select_dist.sample()
+        crop_select_log_prob = crop_select_dist.log_prob(crop_select_action)  # Compute log probability
         
         harvest_mask_dist = torch.distributions.Bernoulli(logits=harvest_mask_logits)
         harvest_mask_action = harvest_mask_dist.sample()
@@ -209,13 +235,16 @@ class PolicyGradientAgent:
             'fertilizer_amount': torch.clamp(fertilizer_action, 0, 1).detach().cpu().numpy().squeeze(),
             'crop_mask': crop_mask_action.squeeze(0).detach().cpu().numpy(),
             'harvest_mask': harvest_mask_action.squeeze(0).detach().cpu().numpy(),
+            'crop_type': crop_select_action.item()
         }
-        log_prob = water_log_prob + fertilizer_log_prob + crop_mask_log_prob + harvest_mask_log_prob
+        log_prob = water_log_prob + fertilizer_log_prob + crop_mask_log_prob + harvest_mask_log_prob + crop_select_log_prob
         entropy = (
             water_dist.entropy().mean()
             + fertilizer_dist.entropy().mean()
             + crop_mask_dist.entropy().mean()
-        ) / 4
+            + harvest_mask_dist.entropy().mean()
+            + crop_select_dist.entropy()
+        ) / 5
         return action, log_prob, entropy
         
     def beta_cycle(self, T=150, beta_min=0.01, beta_max=0.2):

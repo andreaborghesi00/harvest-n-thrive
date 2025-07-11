@@ -15,10 +15,10 @@ GAMMA = 0.99  # Discount factor
 EPISODES = 2000  # Number of training episodes
 BATCH_SIZE = 10  # Update policy after X episodes
 HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
-DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-EXPERIMENT_NAME = "eps_greedy_decay_999"
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+EXPERIMENT_NAME = "testing_2"
 
-EPS_GREEDY = True  # Use epsilon-greedy exploration
+EPS_GREEDY = False  # Use epsilon-greedy exploration
 ICM = False  # Use Intrinsic Curiosity Module
 ENTROPY_BONUS = False
 
@@ -38,18 +38,18 @@ INFO_DIR.mkdir(parents=True, exist_ok=True)
 REWARDS_DIR.mkdir(parents=True, exist_ok=True)
 
 shutdown_flag = threading.Event()
+sigusr1_flag = threading.Event()
 
 def on_sigint(signum, frame):
     print("\nSIGINT received; will stop after this episode.")
     shutdown_flag.set()
+
+def on_sigusr1(signum, frame):
+    print("\nSIGUSR1 received; will save current state.")
+    sigusr1_flag.set()
     
 signal.signal(signal.SIGINT, on_sigint)
-        # if episode % BATCH_SIZE == 0:
-        #     print(f"Action stats: "
-        #         f"Water={action['water_amount'].mean():.2f}±{action['water_amount'].std():.2f} "
-        #         f"Fert={action['fertilizer_amount'].mean():.2f} "
-        #         f"CropMask={action['crop_mask'].mean():.2f} "
-        #         f"CropSel={action['crop_selection']}")
+signal.signal(signal.SIGUSR1, on_sigusr1)
 
 
 def flatten_observation(obs, years):
@@ -65,7 +65,7 @@ def flatten_observation(obs, years):
 def flatten_action(action):
     return np.concatenate([
         action['crop_mask'].flatten(),
-        # [action['crop_selection']],
+        [action['crop_type']],
         action['harvest_mask'].flatten(),
         action['water_amount'].flatten(),
         action['fertilizer_amount'].flatten()
@@ -116,7 +116,7 @@ def main():
     farm_size = (10, 10)
     weekly_water_supply = farm_size[0] * farm_size[1] * 0.75  # 0.5 water per cell per week
     weekly_fertilizer_supply = farm_size[0] * farm_size[1] * 0.5  # 0.5 fertilizer per cell per week
-    weekly_labour_supply = 1.75 * farm_size[0] * farm_size[1]  # labour per cell per week
+    weekly_labour_supply = 13 * farm_size[0] * farm_size[1]  # labour per cell per week
     farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=weekly_water_supply*52, yearly_fertilizer_supply=weekly_fertilizer_supply*52, weekly_labour_supply=weekly_labour_supply)
     
     sample_obs, _ = farm_env.reset()
@@ -141,7 +141,7 @@ def main():
                                 use_icm=ICM,
                                 entropy_bonus = ENTROPY_BONUS,
                                 )
-
+    print(f"Agent n params: {sum(p.numel() for p in agent.policy.parameters() if p.requires_grad)}")
     epsilon = EPS_START
     
     pbar = tqdm(total=EPISODES, desc="Training", unit="step")
@@ -153,6 +153,11 @@ def main():
         r_exts = []
         if shutdown_flag.is_set():
             break
+        
+        if sigusr1_flag.is_set():
+            np.save(INFO_DIR / f'reinforce_{EXPERIMENT_NAME}_infos.npy', infos)
+            print("saved. resuming training...")
+            sigusr1_flag.clear()
         
         obs, _ = farm_env.reset(options={'episode': episode})
         state = flatten_observation(obs, years)
