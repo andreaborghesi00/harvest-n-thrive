@@ -32,14 +32,14 @@ signal.signal(signal.SIGINT, on_sigint)
 signal.signal(signal.SIGUSR1, on_sigusr1)
 
 
-def flatten_observation(obs, years):
+def flatten_observation(obs):
     return np.concatenate([
         obs['farm_state'].flatten(),
         obs['water_supply'],
         obs['fertilizer_supply'],
         obs['labour_supply'],
         [obs['current_week'] / 52],
-        [obs['current_year'] / years]
+        [obs['current_year'] / CONFIGS.years]
     ])
     
 def flatten_action(action):
@@ -59,7 +59,7 @@ def average_infos(infos):
     return avg_info
 
 
-def random_train(farm_env, years, episodes):
+def random_train(farm_env, episodes):
     pbar = tqdm(total=episodes, desc="Training", unit="step")
     mean_rewards = []
     farm_env.reset()
@@ -86,25 +86,22 @@ def random_train(farm_env, years, episodes):
         mean_rewards.append(np.mean(rewards))
         
     pbar.close()
-    print(mean_rewards)
     print(average_infos(infos))
-    np.save(CONFIGS.rewards_path + f'random_{CONFIGS.experiment_name}.npy', mean_rewards)
-    np.save(CONFIGS.infos_path + f'random_{CONFIGS.experiment_name}_infos.npy', infos)
+    np.save(CONFIGS.rewards_path / f'random_{CONFIGS.experiment_name}.npy', mean_rewards)
+    np.save(CONFIGS.infos_path / f'random_{CONFIGS.experiment_name}_infos.npy', infos)
     
 def main():
-    years = 10
-    farm_size = (10, 10)
-    weekly_water_supply = farm_size[0] * farm_size[1] * 0.75  # 0.5 water per cell per week
-    weekly_fertilizer_supply = farm_size[0] * farm_size[1] * 0.5  # 0.5 fertilizer per cell per week
-    weekly_labour_supply = 1.5 * farm_size[0] * farm_size[1]  # labour per cell per week
-    yield_exponent = 2.0
+    farm_size = (CONFIGS.farm_size, CONFIGS.farm_size)
+    weekly_water_supply = farm_size[0] * farm_size[1] * CONFIGS.weekly_water_tile_supply  
+    weekly_fertilizer_supply = farm_size[0] * farm_size[1] * CONFIGS.weekly_fertilizer_tile_supply  
+    weekly_labour_supply = farm_size[0] * farm_size[1] * CONFIGS.weekly_labour_tile_supply
     farm_env = gym.envs.make("Farm-v0", 
-                             years=years, 
+                             years=CONFIGS.years, 
                              farm_size=farm_size, 
                              yearly_water_supply=weekly_water_supply*52, 
                              yearly_fertilizer_supply=weekly_fertilizer_supply*52, 
                              weekly_labour_supply=weekly_labour_supply,
-                             exp=yield_exponent)
+                             exp=CONFIGS.yield_exponent)
     
     # save a json with the configs used in this training:
     
@@ -113,14 +110,14 @@ def main():
     sample_action = farm_env.action_space.sample()
     
     total_cells = farm_size[0] * farm_size[1]
-    state_dim = flatten_observation(sample_obs, years).shape[0] 
+    state_dim = flatten_observation(sample_obs).shape[0] 
     action_dim = flatten_action(sample_action).shape[0] 
     
     print("Predicted Observation Space Shape:", (state_dim,))
-    print("Observation Space Shape:", flatten_observation(sample_obs, years).shape)
+    print("Observation Space Shape:", flatten_observation(sample_obs).shape)
     print("Sample Action Shape:", flatten_action(sample_action).shape)
  
-    random_train(farm_env, years, 50)
+    random_train(farm_env, 50)
 
     agent = PolicyGradientAgent(state_dim=state_dim,
                                 action_dim=action_dim, 
@@ -145,12 +142,12 @@ def main():
             break
         
         if sigusr1_flag.is_set():
-            np.save(CONFIGS.infos_path + f'reinforce_{CONFIGS.experiment_name}_infos.npy', infos)
+            np.save(CONFIGS.infos_path / f'reinforce_{CONFIGS.experiment_name}_infos.npy', infos)
             print("saved. resuming training...")
             sigusr1_flag.clear()
         
         obs, _ = farm_env.reset(options={'episode': episode})
-        state = flatten_observation(obs, years)
+        state = flatten_observation(obs)
         terminated = False
         truncated = False
         rewards = []
@@ -166,7 +163,7 @@ def main():
                 action, log_prob, entropy = agent.select_action_hybrid(state)
                 
             next_state, reward, terminated, truncated, info = farm_env.step(action)
-            next_state = flatten_observation(next_state, years)
+            next_state = flatten_observation(next_state)
             
             r_exts.append(reward)
             if agent.icm is not None:
@@ -198,11 +195,11 @@ def main():
             print(average_infos(infos[-CONFIGS.batch_size:]))
             
     # save infos and rewards array
-    np.save(CONFIGS.infos_path + f'reinforce_{CONFIGS.experiment_name}_infos.npy', infos)
+    np.save(CONFIGS.infos_path / f'reinforce_{CONFIGS.experiment_name}_infos.npy', infos)
     
     pbar.close()
     print(mean_rewards)
-    np.save(CONFIGS.rewards_path + f'reinforce_{CONFIGS.experiment_name}_rewards.npy', mean_rewards)
+    np.save(CONFIGS.rewards_path / f'reinforce_{CONFIGS.experiment_name}_rewards.npy', mean_rewards)
     
 if __name__ == "__main__":
     main()

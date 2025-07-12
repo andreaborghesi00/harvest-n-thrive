@@ -1,6 +1,13 @@
 experiment_name: "icm"
 device: "cuda:1"
-  
+
+years: 10
+farm_size: 10 # will be a square grid of shape (farm_size, farm_size)
+weekly_water_tile_supply: 0.75
+weekly_fertilizer_tile_supply: 0.5
+weekly_labour_tile_supply: 1.5
+yield_exponent: 2.0
+
 batch_size: 10
 episodes: 2000
 learning_rate: 0.0003

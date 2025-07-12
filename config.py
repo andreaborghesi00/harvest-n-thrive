@@ -11,7 +11,6 @@ class ModelConfig:
     experiment_name: str = field(default=None)
     notes: str = field(default=None)
     device: str = field(default="cuda:0")
-    # Model architecture
     
     # Training hyperparameters
     batch_size: int = 10
@@ -19,6 +18,14 @@ class ModelConfig:
     learning_rate: float = 3e-4
     patience: int = 0
     gamma: float = 0.99
+    
+    ## Farm hyperparameters
+    years: int = 10
+    farm_size: int = 10
+    weekly_water_tile_supply: float = 0.75
+    weekly_fertilizer_tile_supply: float = 0.5
+    weekly_labour_tile_supply: float = 1.5
+    yield_exponent: float = 2.0 
     
     ## Exploration strategies
     eps_greedy: bool = False
@@ -30,16 +37,16 @@ class ModelConfig:
     
     eps_start: float = 1.0
     eps_end: float = 0.05
-    esp_decay: float = 0.997 # to reach 0.05 needs ~1000 episodes. 0.998 for ~1500 episodes
+    eps_decay: float = 0.997 # to reach 0.05 needs ~1000 episodes. 0.998 for ~1500 episodes
     
     # something for entropy bonus
     
     
     # Paths and Logging
     results_path: str = Path("results/")
-    rewards_path: str = Path(results_path + "rewards/")
-    infos_path: str = Path(results_path + "infos/")
-    configs_path: str = Path(results_path + "configs/")
+    rewards_path: str =results_path / "rewards/"
+    infos_path: str =results_path / "infos/"
+    configs_path: str =results_path / "configs/"
         
     @classmethod
     def load_config(cls, config_path: str = os.path.join(Path(__file__).parent, "config.yaml")) -> "ModelConfig":
