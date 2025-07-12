@@ -9,33 +9,13 @@ import torch
 import signal
 import threading
 from pathlib import Path
+from config import get_config
 
-LEARNING_RATE = 3e-4
-GAMMA = 0.99  # Discount factor
-EPISODES = 2000  # Number of training episodes
-BATCH_SIZE = 10  # Update policy after X episodes
-HIDDEN_UNITS = 256  # Reduced hidden layer size for efficiency
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EXPERIMENT_NAME = "testing_2"
+CONFIGS = get_config()
 
-EPS_GREEDY = False  # Use epsilon-greedy exploration
-ICM = False  # Use Intrinsic Curiosity Module
-ENTROPY_BONUS = False
-
-# For ICM
-ETA = 130.0  # Weighting between internal curiosity and external reward
-
-# Epsilon-greedy
-EPS_START   = 1.0 # start fully random
-EPS_END     = 0.1 # end with some randomness
-EPS_DECAY   = 0.999 # decay per episode
-
-RESULTS_DIR = Path("results/")
-INFO_DIR = RESULTS_DIR / "infos"
-REWARDS_DIR = RESULTS_DIR / "rewards"
-
-INFO_DIR.mkdir(parents=True, exist_ok=True)
-REWARDS_DIR.mkdir(parents=True, exist_ok=True)
+Path(CONFIGS.rewards_path).mkdir(parents=True, exist_ok=True)
+Path(CONFIGS.infos_path).mkdir(parents=True, exist_ok=True)
+Path(CONFIGS.configs_path).mkdir(parents=True, exist_ok=True)
 
 shutdown_flag = threading.Event()
 sigusr1_flag = threading.Event()
@@ -108,8 +88,8 @@ def random_train(farm_env, years, episodes):
     pbar.close()
     print(mean_rewards)
     print(average_infos(infos))
-    np.save(REWARDS_DIR / f'random_{EXPERIMENT_NAME}.npy', mean_rewards)
-    np.save(INFO_DIR / f'random_{EXPERIMENT_NAME}_infos.npy', infos)
+    np.save(CONFIGS.rewards_path + f'random_{CONFIGS.experiment_name}.npy', mean_rewards)
+    np.save(CONFIGS.infos_path + f'random_{CONFIGS.experiment_name}_infos.npy', infos)
     
 def main():
     years = 10
@@ -125,6 +105,9 @@ def main():
                              yearly_fertilizer_supply=weekly_fertilizer_supply*52, 
                              weekly_labour_supply=weekly_labour_supply,
                              exp=yield_exponent)
+    
+    # save a json with the configs used in this training:
+    
     
     sample_obs, _ = farm_env.reset()
     sample_action = farm_env.action_space.sample()
@@ -142,27 +125,27 @@ def main():
     agent = PolicyGradientAgent(state_dim=state_dim,
                                 action_dim=action_dim, 
                                 total_cells=total_cells, 
-                                learning_rate=LEARNING_RATE, 
-                                gamma=GAMMA, 
-                                device=DEVICE, 
-                                use_icm=ICM,
-                                entropy_bonus = ENTROPY_BONUS,
+                                learning_rate=CONFIGS.learning_rate, 
+                                gamma=CONFIGS.gamma, 
+                                device=CONFIGS.device, 
+                                use_icm=CONFIGS.icm,
+                                entropy_bonus = CONFIGS.entropy_bonus,
                                 )
     print(f"Agent n params: {sum(p.numel() for p in agent.policy.parameters() if p.requires_grad)}")
-    epsilon = EPS_START
+    epsilon = CONFIGS.eps_start
     
-    pbar = tqdm(total=EPISODES, desc="Training", unit="step")
+    pbar = tqdm(total=CONFIGS.episodes, desc="Training", unit="step")
     mean_rewards = []
     infos = []
     state, _ = farm_env.reset()
-    for episode in range(EPISODES):
+    for episode in range(CONFIGS.episodes):
         r_ints = []
         r_exts = []
         if shutdown_flag.is_set():
             break
         
         if sigusr1_flag.is_set():
-            np.save(INFO_DIR / f'reinforce_{EXPERIMENT_NAME}_infos.npy', infos)
+            np.save(CONFIGS.infos_path + f'reinforce_{CONFIGS.experiment_name}_infos.npy', infos)
             print("saved. resuming training...")
             sigusr1_flag.clear()
         
@@ -175,7 +158,7 @@ def main():
         r_ints = []
         r_exts = [] 
         while not (terminated or truncated):
-            if EPS_GREEDY and random.random() < epsilon:
+            if CONFIGS.eps_greedy and random.random() < epsilon:
                 action = farm_env.action_space.sample()
                 log_prob = torch.tensor([0.0], device=agent.device)
                 entropy  = torch.tensor(0.0, device=agent.device)
@@ -188,8 +171,8 @@ def main():
             r_exts.append(reward)
             if agent.icm is not None:
                 r_int = agent.icm.compute_intrinsic_reward(state, next_state, flatten_action(action))
-                r_ints.append(ETA * r_int)
-                reward += ETA * r_int
+                r_ints.append(CONFIGS.icm_eta * r_int)
+                reward += CONFIGS.icm_eta * r_int
                 agent.icm.update(state=state, next_state=next_state, action=flatten_action(action))
             
             agent.store_outcome(log_prob, reward, state, entropy)            
@@ -207,19 +190,19 @@ def main():
         mean_rewards.append(np.mean(rewards))
         infos.append(info)
         # Decay epsilon
-        epsilon = max(epsilon * EPS_DECAY, EPS_END)
+        epsilon = max(epsilon * CONFIGS.eps_decay, CONFIGS.eps_end)
         
         # update policy every BATCH_SIZE episodes
-        if (episode + 1) % BATCH_SIZE == 0:
+        if (episode + 1) % CONFIGS.batch_size == 0:
             agent.update_policy()
-            print(average_infos(infos[-BATCH_SIZE:]))
+            print(average_infos(infos[-CONFIGS.batch_size:]))
             
     # save infos and rewards array
-    np.save(INFO_DIR / f'reinforce_{EXPERIMENT_NAME}_infos.npy', infos)
+    np.save(CONFIGS.infos_path + f'reinforce_{CONFIGS.experiment_name}_infos.npy', infos)
     
     pbar.close()
     print(mean_rewards)
-    np.save(REWARDS_DIR / f'reinforce_{EXPERIMENT_NAME}_rewards.npy', mean_rewards)
+    np.save(CONFIGS.rewards_path + f'reinforce_{CONFIGS.experiment_name}_rewards.npy', mean_rewards)
     
 if __name__ == "__main__":
     main()

@@ -1,0 +1,16 @@
+experiment_name: "icm"
+device: "cuda:1"
+  
+batch_size: 10
+episodes: 2000
+learning_rate: 0.0003
+patience: 40
+
+eps_greedy: False
+icm: True
+entropy_bonus: False
+
+icm_eta: 200
+eps_start: 1.0
+eps_end: 0.05
+eps_decay: 0.997
