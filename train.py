@@ -116,8 +116,15 @@ def main():
     farm_size = (10, 10)
     weekly_water_supply = farm_size[0] * farm_size[1] * 0.75  # 0.5 water per cell per week
     weekly_fertilizer_supply = farm_size[0] * farm_size[1] * 0.5  # 0.5 fertilizer per cell per week
-    weekly_labour_supply = 13 * farm_size[0] * farm_size[1]  # labour per cell per week
-    farm_env = gym.envs.make("Farm-v0", years=years, farm_size=farm_size, yearly_water_supply=weekly_water_supply*52, yearly_fertilizer_supply=weekly_fertilizer_supply*52, weekly_labour_supply=weekly_labour_supply)
+    weekly_labour_supply = 1.5 * farm_size[0] * farm_size[1]  # labour per cell per week
+    yield_exponent = 2.0
+    farm_env = gym.envs.make("Farm-v0", 
+                             years=years, 
+                             farm_size=farm_size, 
+                             yearly_water_supply=weekly_water_supply*52, 
+                             yearly_fertilizer_supply=weekly_fertilizer_supply*52, 
+                             weekly_labour_supply=weekly_labour_supply,
+                             exp=yield_exponent)
     
     sample_obs, _ = farm_env.reset()
     sample_action = farm_env.action_space.sample()

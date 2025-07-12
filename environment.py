@@ -72,17 +72,22 @@ fertilizer_need: the amount of fertilizer needed each week for the crop to grow 
 price: the base price of the crop at the market with yield 1.0 
 """
 CROP_TYPES = {
-    1: {"name": "wheat", "growth_time": 28, "base_yield": 0.8, "water_need": 0.6, "fertilizer_need": 0.5, "price": 10},
-    2: {"name": "corn", "growth_time": 42, "base_yield": 0.9, "water_need": 0.7, "fertilizer_need": 0.6, "price": 15},
-    3: {"name": "tomato", "growth_time": 35, "base_yield": 0.7, "water_need": 0.8, "fertilizer_need": 0.7, "price": 20},
-    4: {"name": "potato", "growth_time": 30, "base_yield": 0.85, "water_need": 0.5, "fertilizer_need": 0.4, "price": 12},
+    1: {"name": "wheat", "growth_time": 8, "base_yield": 0.8, "water_need": 0.6, "fertilizer_need": 0.5, "price": 10},
+    2: {"name": "corn", "growth_time": 4, "base_yield": 0.9, "water_need": 0.7, "fertilizer_need": 0.6, "price": 15},
+    3: {"name": "tomato", "growth_time": 5, "base_yield": 0.7, "water_need": 0.8, "fertilizer_need": 0.7, "price": 20},
+    4: {"name": "potato", "growth_time": 6, "base_yield": 0.85, "water_need": 0.5, "fertilizer_need": 0.4, "price": 12},
 }
 
 class Farm(gym.Env):
     
-    def __init__(self, farm_size=(10, 10), years=10, yearly_water_supply=1000, yearly_fertilizer_supply=500, weekly_labour_supply=100):
+    def __init__(self, farm_size=(10, 10),
+                 years=10, 
+                 yearly_water_supply=1000, 
+                 yearly_fertilizer_supply=500, 
+                 weekly_labour_supply=100,
+                 exp=2.0):
         super().__init__()
-        
+        self.exp = exp 
         self.years = years
         self.yearly_water_supply = yearly_water_supply
         self.yearly_fertilizer_supply = yearly_fertilizer_supply
@@ -236,6 +241,7 @@ class Farm(gym.Env):
         self.farm[to_plant, 3] = 0.0                             # yield
 
         num_planted = to_plant.shape[0]
+        self.labour_supply -= num_planted * LABOR_COSTS["planting"]
         self.info_memory["planted_crops"] = self.info_memory.get("planted_crops", 0) + num_planted        
         
         # Watering crops
@@ -357,7 +363,7 @@ class Farm(gym.Env):
                 growth_time = CROP_TYPES[crop_id]["growth_time"]
                 water_need = CROP_TYPES[crop_id]["water_need"]
                 fertilizer_need = CROP_TYPES[crop_id]["fertilizer_need"]
-                base_yield = CROP_TYPES[crop_id]["base_yield"]
+                max_yield = CROP_TYPES[crop_id]["base_yield"] ** (1 / self.exp)  # base yield adjusted by the exponent
                 growth_step = 1 / growth_time
                 # print(f"Growth step: {growth_step}")
                 
@@ -383,12 +389,12 @@ class Farm(gym.Env):
                     self.farm[i, 1] = min(self.farm[i,1] + growth_step * growth_mutliplier, 1.0)
                     self.farm[i, 2] = min(self.farm[i, 2] + 0.1, 1.0)
                     if self.farm[i, 1] <= 1.0: # the yield increses only if the crop is not fully grown 
-                        self.farm[i, 3] = min(self.farm[i,3] + base_yield * growth_step * 1.5 if self.farm[i, 5] >= fertilizer_need else base_yield * growth_step, base_yield)
+                        self.farm[i, 3] = min(self.farm[i,3] + max_yield * growth_step * 1.5 if self.farm[i, 5] >= fertilizer_need else max_yield * growth_step, max_yield)
                 else:
                     # Not enough water: growth stale, health and yield reduced
                     # This is a way to permanently damage the crop, as the yield is reduced while the growth is stale, meaning the crop will never reach its full yield potential 
                     self.farm[i, 2] = max(self.farm[i, 2] - 0.2, 0.0)
-                    self.farm[i, 3] = max(self.farm[i, 3] - base_yield * growth_step * .5, 0.0)
+                    self.farm[i, 3] = max(self.farm[i, 3] - max_yield * growth_step * .5, 0.0)
                     reward -= self.unwatered_crop_penalty
                     
                     self.info_memory["unwatered_crops"] = self.info_memory.get("unwatered_crops", 0) + 1
@@ -416,10 +422,7 @@ class Farm(gym.Env):
         self.info_memory["labour_used"] += (self.weekly_labour_supply - self.labour_supply) # total labour used
         
         # step bonus rewards
-        growth_reward = np.sum(self.farm[:, 1]) * 1 # reward for growing crops
-        health_reward = np.sum(self.farm[:, 2]) * 1 # reward for healthy crops
-        yield_reward = np.sum(self.farm[:, 3]) * 1 # reward for yield, we really want to encourage the agent to grow crops that yield more
-        
+
         # step bonus for resource efficiency
         water_efficiency = (water_used) * 1
         fertilizer_efficiency = (fertilizer_used) * 1
@@ -435,7 +438,6 @@ class Farm(gym.Env):
         labour_efficiency = (self.weekly_labour_supply - self.labour_supply) * 0.5
         
         # REWARD COMPUTATION
-        reward += yield_reward + health_reward + growth_reward
         reward += water_efficiency + fertilizer_efficiency + labour_efficiency
         reward -= (water_wasted_penalty + fertilizer_wasted_penalty)
         reward -= unused_labour_penalty
@@ -462,10 +464,15 @@ class Farm(gym.Env):
         for i in range(self.total_cells):
             if self.labour_supply >= LABOR_COSTS["harvesting"]:
                 if harvest_mask[i] == 1 and self.farm[i, 0] > 0:
+                    growth_reward = np.sum(self.farm[i, 1]) * 1 # reward for growing crops
+                    health_reward = np.sum(self.farm[i, 2]) * 1 # reward for healthy crops
+                    yield_reward = np.sum(self.farm[i, 3]) * 10 # reward for yield, we really want to encourage the agent to grow crops that yield more
+                    
                     crop_id = int(self.farm[i, 0])  # 0 is no crop, so we subtract 1 to match the CROP_TYPES index
-                    harvest_reward = (self.farm[i, 3] * CROP_TYPES[crop_id]["price"]) * mm[crop_id-1] * 3  # yield * price * market multiplier
+                    harvest_reward = (self.farm[i, 3]**self.exp * CROP_TYPES[crop_id]["price"]) * mm[crop_id-1] * 3  # yield * price * market multiplier
                     # harvest_reward = (self.farm[i, 3] * CROP_TYPES[crop_id]["price"])  * 3 # yield * price 
                     reward += harvest_reward 
+                    reward += yield_reward ** self.exp + health_reward + growth_reward
 
                     # update info memory running averages
                     self.harvest_count += 1
@@ -551,11 +558,14 @@ register(
                         years=10,
                         yearly_water_supply=1000, 
                         yearly_fertilizer_supply=500, 
-                        weekly_labour_supply=100: Farm(farm_size=farm_size,
-                                                      years=years, 
-                                                      yearly_water_supply=yearly_water_supply, 
-                                                      yearly_fertilizer_supply=yearly_fertilizer_supply, 
-                                                      weekly_labour_supply=weekly_labour_supply),
+                        weekly_labour_supply=100,
+                        exp=2.0
+                        : Farm(farm_size=farm_size, 
+                               years=years, 
+                               yearly_water_supply=yearly_water_supply, 
+                               yearly_fertilizer_supply=yearly_fertilizer_supply, 
+                               weekly_labour_supply=weekly_labour_supply,
+                               exp=exp),
     max_episode_steps=2600, # 50 years 
 )
         
