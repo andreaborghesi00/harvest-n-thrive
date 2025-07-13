@@ -178,7 +178,7 @@ def main():
             agent.store_outcome(log_prob, reward, state, entropy)            
             state = next_state
             
-            rewards.append(reward)
+            rewards.append(r_exts) # otherwise we would poison the icm plot with the intrinsic reward
         
         pbar.update(1)
         pbar.set_postfix({
