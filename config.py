@@ -26,6 +26,10 @@ class ModelConfig:
     weekly_fertilizer_tile_supply: float = 0.5
     weekly_labour_tile_supply: float = 1.5
     yield_exponent: float = 2.0 
+    planting_lab_cost: float = 1.0
+    watering_lab_cost: float = 0.5
+    fertilizing_lab_cost: float = 0.5
+    harvesting_lab_cost: float = 0.75
     
     ## Exploration strategies
     eps_greedy: bool = False

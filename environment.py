@@ -3,6 +3,7 @@ import gymnasium as gym
 from typing import Tuple, Any, Dict, Optional, List
 from gymnasium.envs.registration import register
 import math
+from config import get_config
 """
 (For better readability i suggest to turn on word wrap in your editor (Alt+z in VSCode))
 
@@ -46,19 +47,20 @@ Implementation notes:
 - Oscillating prices: the market prices for crops oscillate over time, with a period of 52 weeks (1 year). For simplicity's sake the prices of each type of crop will oscillate like a cosine function and each of these functions will have their phase shifted by a uniform amount. E.g. with 4 crops we will have a favorite crop per season. 
 
 """
+CONFIGS = get_config()
 
 WEATHER_EVENTS = {
-    "sunny": {"probability": 35/52},
-    "rain": {"water_amount": (0.1, 0.5), "probability":10/52 },
-    "storm": {"health_reduction": (0.1, 0.3), "probability": 2/52},
-    "extreme_heat": {"water_drying_factor": 0.3, "probability": 5/52},
+    "sunny": {"probability": 35./52.},
+    "rain": {"water_amount": (0.1, 0.5), "probability":10./52. },
+    "storm": {"health_reduction": (0.1, 0.3), "probability": 2./52.},
+    "extreme_heat": {"water_drying_factor": 0.3, "probability": 5./52.},
 }
 
 LABOR_COSTS ={
-    "planting": 1.0,
-    "watering": 0.5,
-    "fertilizing": 0.5,
-    "harvesting": 0.75,
+    "planting": CONFIGS.planting_lab_cost,
+    "watering": CONFIGS.watering_lab_cost,
+    "fertilizing": CONFIGS.fertilizing_lab_cost,
+    "harvesting": CONFIGS.harvesting_lab_cost,
 }
 
 WEATHER_DIST = [WEATHER_EVENTS[key]["probability"] for key in WEATHER_EVENTS.keys()]

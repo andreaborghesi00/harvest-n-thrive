@@ -1,5 +1,5 @@
-experiment_name: "entropy_bonus"
-device: "cuda:1"
+experiment_name: "testing"
+device: "cuda:0"
 
 years: 10
 farm_size: 10 # will be a square grid of shape (farm_size, farm_size)
@@ -7,6 +7,10 @@ weekly_water_tile_supply: 0.75
 weekly_fertilizer_tile_supply: 0.5
 weekly_labour_tile_supply: 1.5
 yield_exponent: 2.0
+planting_lab_cost: 1.5
+watering_lab_cost: 0.25
+fertilizing_lab_cost: 0.25
+harvesting_lab_cost: 3.5
 
 batch_size: 10
 episodes: 2000
@@ -17,7 +21,7 @@ eps_greedy: False
 icm: False
 entropy_bonus: False
 
-icm_eta: 200
+icm_eta: 5
 eps_start: 1.0
 eps_end: 0.05
 eps_decay: 0.997
