@@ -39,7 +39,9 @@ class ModelConfig:
     eps_end: float = 0.05
     eps_decay: float = 0.997 # to reach 0.05 needs ~1000 episodes. 0.998 for ~1500 episodes
     
-    # something for entropy bonus
+    beta_start: float = 1.0
+    beta_end: float = 0.05
+    beta_decay: float= 0.997
     
     
     # Paths and Logging

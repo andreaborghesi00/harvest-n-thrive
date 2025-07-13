@@ -127,6 +127,9 @@ def main():
                                 device=CONFIGS.device, 
                                 use_icm=CONFIGS.icm,
                                 entropy_bonus = CONFIGS.entropy_bonus,
+                                beta_max=CONFIGS.beta_start,
+                                beta_min=CONFIGS.beta_end,
+                                beta_decay=CONFIGS.beta_decay
                                 )
     print(f"Agent n params: {sum(p.numel() for p in agent.policy.parameters() if p.requires_grad)}")
     epsilon = CONFIGS.eps_start

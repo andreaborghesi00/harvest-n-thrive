@@ -6,10 +6,6 @@ from typing import Dict, Any
 import numpy as np
 from icm import ICM
 
-BETA_MAX = 0.2
-BETA_MIN = 0.01
-BETA_T = 150  # Number of steps for one cycle of beta
-
 class ResidualBlock(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -103,6 +99,9 @@ class PolicyGradientAgent:
                  episodes: int = 1000,
                  use_icm: bool = True,
                  entropy_bonus: bool = False,
+                 beta_max: float = 1.0,
+                 beta_min: float = 0.05,
+                 beta_decay: float = 0.997,
                  device=torch.device("cuda") if torch.cuda.is_available() else "cpu"):
         self.device = device
         self.total_cells = total_cells
@@ -115,6 +114,9 @@ class PolicyGradientAgent:
         self.gamma = gamma
         self.episode = 0
         self.entropy_bonus = entropy_bonus
+        self.beta = beta_max
+        self.beta_decay = beta_decay
+        self.beta_min = beta_min
         self.icm = ICM(state_dim=state_dim, action_dim=action_dim, device=self.device).to(self.device) if use_icm else None
 
     def select_action_hybrid(self, state):
@@ -195,7 +197,7 @@ class PolicyGradientAgent:
         if self.entropy_bonus:
             for (log_prob, _, _, entropy), R in zip(self.memory, returns):
                 advantage = R - baseline  
-                exploration_bonus = self.beta_cycle(T=BETA_T, beta_max=BETA_MAX, beta_min=BETA_MIN) * entropy
+                exploration_bonus = self.beta * entropy
                 policy_loss.append(-log_prob * advantage - exploration_bonus)  # Gradient ascent
         
         else: 
@@ -211,6 +213,10 @@ class PolicyGradientAgent:
         
         episode_reward = sum(reward for _, reward, _, _ in self.memory)
         self.scheduler.step(episode_reward)
+
+        # beta decay
+        if self.entropy_bonus:
+            self.beta = max(self.beta * self.beta_decay, self.beta_min)
 
         # Clear memory after updating policy
         self.memory = []

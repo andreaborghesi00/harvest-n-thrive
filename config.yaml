@@ -1,4 +1,4 @@
-experiment_name: "icm"
+experiment_name: "entropy_bonus"
 device: "cuda:1"
 
 years: 10
@@ -14,10 +14,14 @@ learning_rate: 0.0003
 patience: 40
 
 eps_greedy: False
-icm: True
+icm: False
 entropy_bonus: False
 
 icm_eta: 200
 eps_start: 1.0
 eps_end: 0.05
 eps_decay: 0.997
+
+beta_start: 1.0
+beta_end: 0.05
+beta_decay: 0.997
