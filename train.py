@@ -182,7 +182,7 @@ def main():
             "tot_reward": np.mean(rewards),
             "int": np.mean(r_ints) if len(r_ints) > 0 else 0.0,
             "ext": np.mean(r_exts),
-            "havest": info['harvest_reward'],
+            "harvest": info['harvest_reward'],
         })
         mean_rewards.append(np.mean(rewards))
         infos.append(info)
