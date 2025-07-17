@@ -16,7 +16,6 @@ batch_size: 10
 episodes: 2000
 learning_rate: 0.0003
 patience: 40
-gamma: 1.0
 
 eps_greedy: False
 icm: False
