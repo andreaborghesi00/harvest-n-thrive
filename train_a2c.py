@@ -5,8 +5,8 @@ from tqdm import tqdm
 import signal
 import threading
 from pathlib import Path
-from config import get_config
-from actor2critic import ActorCriticAgent
+from configs.config import get_config
+from agents.actor2critic import ActorCriticAgent
 
 CONFIGS = get_config()
 

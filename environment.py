@@ -3,7 +3,7 @@ import gymnasium as gym
 from typing import Tuple, Any, Dict, Optional, List
 from gymnasium.envs.registration import register
 import math
-from config import get_config
+from configs.config import get_config
 """
 (For better readability i suggest to turn on word wrap in your editor (Alt+z in VSCode))
 

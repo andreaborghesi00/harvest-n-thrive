@@ -1,5 +1,5 @@
 import environment as env
-from reinforce import PolicyGradientAgent
+from agents.reinforce import PolicyGradientAgent
 import numpy as np
 import gymnasium as gym
 from tqdm import tqdm
@@ -9,7 +9,7 @@ import torch
 import signal
 import threading
 from pathlib import Path
-from config import get_config
+from configs.config import get_config
 
 CONFIGS = get_config()
 
