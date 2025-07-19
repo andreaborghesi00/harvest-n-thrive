@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Normal, Categorical, Bernoulli
-from icm import ICM
+from agents.icm import ICM
 
 EXPLORATION_COEFFICIENT = 0.2
 EXPLORATION_COEFFICIENT_DECAY = 0.99

@@ -4,7 +4,7 @@ import torch.optim as optim
 import math
 from typing import Dict, Any
 import numpy as np
-from icm import ICM
+from agents.icm import ICM
 
 class ResidualBlock(nn.Module):
     def __init__(self, dim):
